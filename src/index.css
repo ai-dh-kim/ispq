@@ -1,0 +1,175 @@
+/* Black & White theme system (PRD §4 FR-06). Theme is driven by the
+   [data-theme] attribute on <html>; all surfaces read CSS variables so the
+   ApexCharts theme switch and the rest of the UI stay in lockstep. */
+
+:root[data-theme='dark'] {
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --surface-2: #262626;
+  --text: #ffffff;
+  --text-dim: #b0b0b0;
+  --border: #333333;
+  --accent: #4da3ff;
+  --good: #4caf50;
+  --bad: #ff5252;
+  --warn: #ffb300;
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --surface: #f5f5f5;
+  --surface-2: #ececec;
+  --text: #000000;
+  --text-dim: #555555;
+  --border: #d0d0d0;
+  --accent: #1565c0;
+  --good: #2e7d32;
+  --bad: #c62828;
+  --warn: #ef6c00;
+  --shadow: rgba(0, 0, 0, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.app { display: flex; flex-direction: column; min-height: 100%; }
+
+/* ---- Toolbar ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.toolbar h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+.toolbar .spacer { flex: 1; }
+.mode-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--border); color: var(--text-dim);
+}
+.mode-badge.sim { color: var(--warn); border-color: var(--warn); }
+.mode-badge.live { color: var(--good); border-color: var(--good); }
+
+/* ---- Generic controls ---- */
+select, button, .control {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--accent); }
+label.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-dim); }
+
+.theme-toggle { min-width: 90px; }
+
+/* ---- Layout ---- */
+.content { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px 20px; flex: 1; }
+/* ISP 패널 접힘 시 차트 영역을 넓힘 */
+.content.isp-collapsed { grid-template-columns: max-content 1fr; }
+@media (max-width: 900px) { .content { grid-template-columns: 1fr; } }
+
+.panel h2.collapsible { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.panel h2.collapsible .caret { font-size: 11px; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 1px 4px var(--shadow);
+}
+.panel h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+
+/* ---- Multi-select dropdown (FR-05) ---- */
+.ms { position: relative; }
+.ms-trigger { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+.ms-panel {
+  position: absolute; z-index: 50; left: 0; right: 0; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 24px var(--shadow);
+  /* Up to 80% of a 1080p viewport, internal scroll (FR-05). */
+  max-height: 80vh; overflow-y: auto;
+}
+.ms-search { width: 100%; padding: 8px 10px; border: none; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); }
+.ms-group { border-bottom: 1px solid var(--border); }
+.ms-group-header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer;
+  font-weight: 600; background: var(--surface-2); position: sticky; top: 0;
+}
+.ms-group.pinned .ms-group-header { color: var(--accent); }
+.ms-pin { font-size: 10px; }
+.ms-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px 24px; cursor: pointer; }
+.ms-item:hover { background: var(--surface-2); }
+.ms-item small { color: var(--text-dim); }
+.ms-actions { display: flex; gap: 8px; padding: 8px 10px; position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+/* ---- Charts / widgets ---- */
+.charts { display: flex; flex-direction: column; gap: 16px; }
+.chart-wrap { min-height: 380px; }
+
+.peak-subhead { font-size: 12px; margin: 16px 0 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid var(--border); padding-top: 12px; }
+.peak-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.peak-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.peak-card .name { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 6px; }
+.peak-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+.peak-row .val { font-variant-numeric: tabular-nums; font-weight: 600; }
+.val.good { color: var(--good); }
+.val.bad { color: var(--bad); }
+.val.warn { color: var(--warn); }
+
+.empty { color: var(--text-dim); padding: 40px; text-align: center; }
+
+/* ---- API settings modal ---- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 520px; max-height: 86vh; overflow-y: auto;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 40px var(--shadow); padding: 20px;
+}
+.modal h2 { margin: 0 0 14px; font-size: 16px; }
+.modal h3 { margin: 18px 0 8px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.modal-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.modal-field input, .provider-row input[type='password'] {
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; width: 100%;
+}
+.provider-row { margin-bottom: 12px; }
+.provider-enable { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; cursor: pointer; }
+.provider-enable em { margin-left: auto; font-style: normal; font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
+.provider-enable em.on { color: var(--good); border-color: var(--good); }
+.provider-enable em.off { color: var(--text-dim); }
+.provider-row input:disabled { opacity: 0.5; }
+.modal-note { font-size: 11px; color: var(--warn); line-height: 1.5; margin: 14px 0 0; }
+.modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+.modal-actions .spacer { flex: 1; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* Custom ApexCharts tooltip (NFR traceability) */
+.qtt { padding: 8px 10px; font-size: 12px; }
+.qtt .qtt-title { font-weight: 600; margin-bottom: 4px; }
+.qtt .qtt-row { display: flex; justify-content: space-between; gap: 16px; }
+.qtt .qtt-low { color: var(--warn); margin-top: 4px; }
+.qtt .qtt-meta { color: var(--text-dim); margin-top: 4px; border-top: 1px dashed var(--border); padding-top: 4px; }
