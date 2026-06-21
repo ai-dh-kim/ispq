@@ -6,6 +6,12 @@
 const BASE = import.meta.env.BASE_URL || '/';
 const KEY = 'fbqd-api-settings';
 
+// 배포(프로덕션)에서는 GitHub의 정적 quality_data.json(raw)을 기본으로 fetch.
+// 로컬 개발(npm run dev)에서는 로컬 public 파일을 쓴다(원격 의존/CORS 회피).
+// 수집기(GitHub Actions)가 이 파일을 주기적으로 갱신하므로 클라이언트는 토큰 0.
+const RAW_DATA_URL =
+  'https://raw.githubusercontent.com/ai-dh-kim/fixed-broadband-quality-dashboard/main/public/quality_data.json';
+
 export type ProviderId = 'cloudflare' | 'mlab' | 'ripe';
 
 export interface ProviderSetting {
@@ -20,7 +26,7 @@ export interface ApiSettings {
 }
 
 export const DEFAULT_SETTINGS: ApiSettings = {
-  dataUrl: `${BASE}quality_data.json`,
+  dataUrl: import.meta.env.PROD ? RAW_DATA_URL : `${BASE}quality_data.json`,
   providers: {
     cloudflare: { enabled: false, token: '' },
     mlab: { enabled: false, token: '' },
