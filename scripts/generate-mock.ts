@@ -55,7 +55,10 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   jitter: { good: 1.5, spread: 0.5, busy: 0.8 },
   bandwidth: { good: 950, spread: 0.2, busy: -0.25 },
   httpErrorRate: { good: 0.2, spread: 0.8, busy: 1.5 },
+  loadedLatency: { good: 22, spread: 0.4, busy: 0.9 },   // 부하 중 지연: idle보다 높고 최번시에 크게 상승
+  p25Throughput: { good: 600, spread: 0.2, busy: -0.28 }, // 하위 25% 처리량: 평균보다 낮고 최번시에 더 민감
   meanThroughput: { good: 920, spread: 0.18, busy: -0.22 },
+  uploadThroughput: { good: 320, spread: 0.25, busy: -0.2 }, // 단일스트림 업로드 실측 수준
   minRtt: { good: 6, spread: 0.2, busy: 0.15 },
   lossRate: { good: 0.1, spread: 1.0, busy: 2.0 },
   cwnd: { good: 4200, spread: 0.3, busy: -0.2 },
@@ -65,10 +68,18 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   hops: { good: 11, spread: 0.15, busy: 0.05 },
   asPathFlaps: { good: 0.2, spread: 1.2, busy: 1.0 },
   dnsResolve: { good: 18, spread: 0.3, busy: 0.5 },
+  // Netflix 스트리밍 품질: HD/4K 가능 비율은 부하에 떨어지고(4K가 더 민감), Speed Index(Mbps)도 소폭 하락.
+  nfHd: { good: 96, spread: 0.03, busy: -0.12 },
+  nf4k: { good: 70, spread: 0.06, busy: -0.3 },
+  nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'meanThroughput', 'cwnd', 'pacingRate', 'availability']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'uploadThroughput', 'cwnd', 'pacingRate', 'availability', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+// 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
+const PCT_CAPPED = new Set(
+  METRICS.filter((m) => m.unit === '%').map((m) => m.id)
+);
 
-// 22시 피크 / 03시 한산의 부하 곡선 (0..1).
+// 22시 최번시 / 03시 최한시의 부하 곡선 (0..1).
 function diurnal(hour: number): number {
   const sigma = 3;
   const raw = Math.abs(hour - 22);
@@ -114,7 +125,7 @@ function simulateSamples(ispId: string, groupId: string, metricId: string, t: nu
       v = HIGHER_IS_BETTER.has(metricId) ? v * (rand() < 0.5 ? 0.15 : 1.0) : v * (3 + rand() * 8);
     }
     if (!HIGHER_IS_BETTER.has(metricId)) v = Math.max(0, v);
-    if (metricId === 'availability') v = Math.min(100, v);
+    if (PCT_CAPPED.has(metricId)) v = Math.min(100, v);
     if (metricId === 'hops') v = Math.round(v);
     out.push(v);
   }
@@ -136,7 +147,7 @@ function synthAggregate(ispId: string, groupId: string, metricId: string, t: num
   const metric = METRIC_BY_ID[metricId];
   let mean = centerValue(ispId, groupId, metricId, t, load) * (1 + gaussian(rand) * 0.03);
   if (!HIGHER_IS_BETTER.has(metricId)) mean = Math.max(0, mean);
-  if (metricId === 'availability') mean = Math.min(100, mean);
+  if (PCT_CAPPED.has(metricId)) mean = Math.min(100, mean);
   mean = Math.min(Math.max(mean, metric.hard.min), metric.hard.max);
 
   const n = tier === 'mid' ? 150 + Math.floor(rand() * 250) : 2500 + Math.floor(rand() * 3500);

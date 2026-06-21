@@ -125,16 +125,6 @@ label.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; 
 .charts { display: flex; flex-direction: column; gap: 16px; }
 .chart-wrap { min-height: 380px; }
 
-.peak-subhead { font-size: 12px; margin: 16px 0 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; border-top: 1px solid var(--border); padding-top: 12px; }
-.peak-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-.peak-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
-.peak-card .name { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 6px; }
-.peak-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-.peak-row .val { font-variant-numeric: tabular-nums; font-weight: 600; }
-.val.good { color: var(--good); }
-.val.bad { color: var(--bad); }
-.val.warn { color: var(--warn); }
-
 .empty { color: var(--text-dim); padding: 40px; text-align: center; }
 
 /* ---- API settings modal ---- */
@@ -173,3 +163,27 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .qtt .qtt-row { display: flex; justify-content: space-between; gap: 16px; }
 .qtt .qtt-low { color: var(--warn); margin-top: 4px; }
 .qtt .qtt-meta { color: var(--text-dim); margin-top: 4px; border-top: 1px dashed var(--border); padding-top: 4px; }
+/* 공유(shared) 툴팁: 시리즈별 블록 */
+.qtt .qtt-series { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.qtt .qtt-series:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.qtt .qtt-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.qtt .qtt-sub { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.qtt .qtt-low-inline { color: var(--warn); margin-left: 6px; }
+
+/* 지표 출처 — 제목 옆 ⓘ 아이콘에 마우스 오버 시 팝오버로 표시 */
+.cite-info { position: relative; display: inline-flex; margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--text-dim); cursor: help; vertical-align: middle; }
+.cite-pop {
+  position: absolute; left: 0; top: 100%; margin-top: 8px; z-index: 30;
+  width: max-content; max-width: 320px;
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 11px; font-weight: 400; line-height: 1.5;
+  text-transform: none; letter-spacing: normal;
+  box-shadow: 0 4px 14px var(--shadow);
+  opacity: 0; visibility: hidden; transition: opacity 0.12s;
+}
+/* 아이콘↔팝오버 사이 투명 연결 다리: 마우스가 틈을 지나도 hover 유지 → 출처 링크 클릭 가능 */
+.cite-pop::before { content: ''; position: absolute; top: -8px; left: 0; right: 0; height: 8px; }
+.cite-info:hover .cite-pop, .cite-info:focus-within .cite-pop { opacity: 1; visibility: visible; }
+.cite-pop a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+.cite-pop a:hover { text-decoration: underline; }

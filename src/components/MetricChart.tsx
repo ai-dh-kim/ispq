@@ -10,7 +10,7 @@ import { aggregateSeries } from '../lib/aggregate.ts';
 import { getTierPoints } from '../data/quality.ts';
 import { colorForIsp } from '../theme.ts';
 import { ISP_BY_ID } from '../data/isps.ts';
-import { METRIC_BY_ID } from '../data/metrics.ts';
+import { METRIC_BY_ID, gradeFor } from '../data/metrics.ts';
 import { VIEWS, RANGES, T, type ViewKey, type RangeKey } from '../config.ts';
 import type { QualityData } from '../types.ts';
 import type { ThemeMode } from '../theme.ts';
@@ -39,6 +39,11 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const tier = RANGES[range].tier;
   const viewDef = VIEWS[view];
 
+  // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [sinceMs, maxMs]로 잡는다.
+  // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.
+  const axis = data.tiers[tier]?.t;
+  const maxMs = axis && axis.length ? axis[axis.length - 1] : sinceMs;
+
   const { series, colors, discrete } = useMemo(() => {
     const series: { name: string; data: DataPoint[] }[] = [];
     const colors: string[] = [];
@@ -46,7 +51,8 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     let si = 0;
     for (const ispId of selectedIsps) {
       const base = getTierPoints(data, ispId, metricId, tier);
-      const pts = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, sinceMs);
+      // -Infinity: sinceMs로 자르지 않고 티어 전체를 차트에 공급.
+      const pts = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
       const color = colorForIsp(colorIndex(ispId));
       series.push({
         name: ISP_BY_ID[ispId]?.name || ispId,
@@ -81,7 +87,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     colors,
     stroke: { width: 2, curve: 'straight' },
     markers: { size: 0, discrete },
-    xaxis: { type: 'datetime', labels: { datetimeUTC: true } },
+    xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: sinceMs, max: maxMs },
     yaxis: {
       title: { text: `${metric.name} (${metric.unit})` },
       labels: { formatter: (v: number) => (v == null ? '' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })) },
@@ -89,26 +95,42 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     grid: { borderColor: chrome.grid, strokeDashArray: 3 },
     legend: { position: 'bottom', showForSingleSeries: true },
     tooltip: {
-      shared: false,
-      custom: ({ seriesIndex, dataPointIndex, w }: { seriesIndex: number; dataPointIndex: number; w: any }) => {
-        const pt: DataPoint = w.config.series[seriesIndex].data[dataPointIndex];
-        const name: string = w.config.series[seriesIndex].name;
-        const m = pt?.meta;
-        const retainedPct = m && m.retained != null ? (m.retained * 100).toFixed(1) : '–';
-        const low = m?.low ? `<div class="qtt-low">${T.lowSampleWarn}</div>` : '';
-        return `<div class="qtt">
-          <div class="qtt-title">${name}</div>
-          <div class="qtt-row"><span>${metric.name}</span><span>${pt.y == null ? '–' : pt.y} ${metric.unit}</span></div>
-          ${low}
-          <div class="qtt-meta">
-            <div class="qtt-row"><span>${T.tooltipTotal}</span><span>${m?.total ?? '–'}</span></div>
-            <div class="qtt-row"><span>${T.tooltipTrimmed}</span><span>${m?.trimmed ?? '–'}</span></div>
-            <div class="qtt-row"><span>${T.tooltipRetained}</span><span>${retainedPct}%</span></div>
-          </div>
-        </div>`;
+      // 공유(shared) 툴팁: x축 기준으로 떠서 버킷 밀도와 무관하게 항상 동작하고,
+      // 선택된 모든 ISP 값을 색상별로 함께 보여 준다 (단일 호버의 시리즈 오인 문제 해소).
+      shared: true,
+      intersect: false,
+      custom: ({ dataPointIndex, w }: { dataPointIndex: number; w: any }) => {
+        const cfg = w.config.series as { name: string; data: DataPoint[] }[];
+        let x: number | null = null;
+        for (const s of cfg) {
+          const p = s.data[dataPointIndex];
+          if (p && p.x != null) { x = p.x; break; }
+        }
+        const when = x == null ? '' : new Date(x).toLocaleString('ko-KR', {
+          timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+        });
+        const blocks = cfg.map((s, i) => {
+          const pt = s.data[dataPointIndex];
+          if (!pt) return '';
+          const color = w.globals.colors[i];
+          const m = pt.meta;
+          const grade = gradeFor(metric, pt.y);
+          const gradeStr = grade ? ` · ${grade}` : '';
+          const valStr = pt.y == null ? '–' : `${pt.y} ${metric.unit}`;
+          const retainedPct = m && m.retained != null ? (m.retained * 100).toFixed(1) : '–';
+          const lowStr = m?.low ? `<span class="qtt-low-inline">${T.lowSampleWarn}</span>` : '';
+          return `<div class="qtt-series">
+            <div class="qtt-row">
+              <span><span class="qtt-swatch" style="background:${color}"></span>${s.name}</span>
+              <span>${valStr}${gradeStr}</span>
+            </div>
+            <div class="qtt-sub">${T.tooltipTotal} ${m?.total ?? '–'} · ${T.tooltipTrimmed} ${m?.trimmed ?? '–'} · ${T.tooltipRetained} ${retainedPct}% ${lowStr}</div>
+          </div>`;
+        }).join('');
+        return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, metric, chrome]);
+  }), [theme, colors, discrete, metric, chrome, sinceMs, maxMs]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;
