@@ -117,14 +117,16 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
           const grade = gradeFor(metric, pt.y);
           const gradeStr = grade ? ` · ${grade}` : '';
           const valStr = pt.y == null ? '–' : `${pt.y} ${metric.unit}`;
-          const retainedPct = m && m.retained != null ? (m.retained * 100).toFixed(1) : '–';
-          const lowStr = m?.low ? `<span class="qtt-low-inline">${T.lowSampleWarn}</span>` : '';
+          // 표본 수 미상(실측 percentile 데이터) → 카운트 대신 안내문.
+          const sub = (m == null || m.total == null)
+            ? `<div class="qtt-sub">${T.liveNote}</div>`
+            : `<div class="qtt-sub">${T.tooltipTotal} ${m.total} · ${T.tooltipTrimmed} ${m.trimmed} · ${T.tooltipRetained} ${m.retained != null ? (m.retained * 100).toFixed(1) : '–'}% ${m.low ? `<span class="qtt-low-inline">${T.lowSampleWarn}</span>` : ''}</div>`;
           return `<div class="qtt-series">
             <div class="qtt-row">
               <span><span class="qtt-swatch" style="background:${color}"></span>${s.name}</span>
               <span>${valStr}${gradeStr}</span>
             </div>
-            <div class="qtt-sub">${T.tooltipTotal} ${m?.total ?? '–'} · ${T.tooltipTrimmed} ${m?.trimmed ?? '–'} · ${T.tooltipRetained} ${retainedPct}% ${lowStr}</div>
+            ${sub}
           </div>`;
         }).join('');
         return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;

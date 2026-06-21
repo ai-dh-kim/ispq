@@ -82,19 +82,19 @@ export const T = {
   ratingGrade: '품질 등급',
   // 지표 출처 표기 (제목 옆 ⓘ 호버)
   citeSource: '출처',
-  // API 설정 모달
-  apiButton: 'API 설정',
-  apiTitle: '데이터 소스 / API 설정',
+  // 지표별 실시간/시뮬 태그
+  liveTag: '실시간',
+  simTag: '시뮬',
+  liveMixed: '일부 실시간',
+  liveNote: '실측값 (표본 수 미제공)',
+  // 데이터 소스 설정 모달
+  apiButton: '데이터 소스',
+  apiTitle: '데이터 소스 설정',
   apiDataUrl: '데이터 소스 URL (quality_data.json)',
-  apiProviders: '제공자 API 토큰',
-  apiEnable: '사용',
-  apiTokenPlaceholder: 'API 토큰 / 키 입력',
   apiSave: '저장',
   apiCancel: '취소',
   apiReset: '기본값',
-  apiSecurityNote: '※ 보안(NFR-02): 운영 환경에서는 토큰을 클라이언트에 저장하지 말고 서버리스 수집기에서만 사용하세요. 실제 동작의 핵심은 입력한 키로 quality_data.json 을 생성하는 백엔드를 가리키는 위 "데이터 소스 URL"입니다.',
-  apiStatusOn: '구성됨',
-  apiStatusOff: '미사용',
+  apiSecurityNote: '※ 이 대시보드는 위 URL의 quality_data.json 한 파일만 불러옵니다. 실데이터는 GitHub Actions 수집기가 API 토큰(저장소 시크릿)으로 생성·갱신하며, 클라이언트(브라우저)에는 토큰이 전혀 저장되지 않습니다(NFR-02). 보통 내 GitHub raw URL을 가리킵니다.',
   // 스크린샷
   screenshotButton: '스크린샷',
   screenshotCapturing: '캡처 중…',

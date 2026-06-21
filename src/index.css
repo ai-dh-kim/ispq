@@ -170,6 +170,11 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .qtt .qtt-sub { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
 .qtt .qtt-low-inline { color: var(--warn); margin-left: 6px; }
 
+/* 지표별 실시간/시뮬 태그 (제목 옆) */
+.live-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 8px; vertical-align: middle; text-transform: none; letter-spacing: normal; }
+.live-tag.live { background: var(--good); color: #fff; }
+.live-tag.sim { background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border); }
+
 /* 지표 출처 — 제목 옆 ⓘ 아이콘에 마우스 오버 시 팝오버로 표시 */
 .cite-info { position: relative; display: inline-flex; margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--text-dim); cursor: help; vertical-align: middle; }
 .cite-pop {
