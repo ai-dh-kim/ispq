@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # rebase-before-push 위해 전체 이력 필요
 
       - uses: actions/setup-node@v5
         with:
@@ -44,5 +46,7 @@ jobs:
             echo "No data changes."
           else
             git commit -m "chore(data): 10-min quality refresh [skip ci]"
-            git push
+            # 원격이 앞서 있어도(재실행/경합) 안전하게: rebase 후 push
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
