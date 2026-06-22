@@ -4,3 +4,9 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# 자격증명/서비스계정 키 — 절대 커밋 금지 (이미 GitHub 시크릿에 보관됨)
+mlab-bq/
+*-service-account*.json
+*gserviceaccount*.json
+broadband-quality-dashboard-*.json
