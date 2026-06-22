@@ -36,13 +36,17 @@ type DataPoint = { x: number; y: number | null; meta: PointMeta };
 
 export default function MetricChart({ metricId, data, selectedIsps, view, range, sinceMs, theme, colorIndex }: Props) {
   const metric = METRIC_BY_ID[metricId];
-  const tier = RANGES[range].tier;
-  const viewDef = VIEWS[view];
 
-  // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [sinceMs, maxMs]로 잡는다.
+  // 월별 인덱스(nfSpeedIndex)는 상단 기간과 무관하게 항상 고정 180일(coarse·1일 버킷)로 표시.
+  const FIXED180 = metricId === 'nfSpeedIndex';
+  const tier = FIXED180 ? 'coarse' : RANGES[range].tier;
+  const viewDef = FIXED180 ? VIEWS['1day'] : VIEWS[view];
+
+  // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [effSince, maxMs]로 잡는다.
   // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.
   const axis = data.tiers[tier]?.t;
   const maxMs = axis && axis.length ? axis[axis.length - 1] : sinceMs;
+  const effSince = FIXED180 ? maxMs - 180 * 86400000 : sinceMs;
 
   const { series, colors, discrete } = useMemo(() => {
     const series: { name: string; data: DataPoint[] }[] = [];
@@ -87,7 +91,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     colors,
     stroke: { width: 2, curve: 'straight' },
     markers: { size: 0, discrete },
-    xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: sinceMs, max: maxMs },
+    xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: effSince, max: maxMs },
     yaxis: {
       title: { text: `${metric.name} (${metric.unit})` },
       labels: { formatter: (v: number) => (v == null ? '' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })) },
@@ -132,7 +136,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, metric, chrome, sinceMs, maxMs]);
+  }), [theme, colors, discrete, metric, chrome, effSince, maxMs]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;

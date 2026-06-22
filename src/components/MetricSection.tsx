@@ -40,7 +40,7 @@ export default function MetricSection(props: Props) {
   return (
     <section className="panel metric-section">
       <h2>
-        {T.chartTitle(metric.name, VIEWS[view].label)}
+        {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)` : T.chartTitle(metric.name, VIEWS[view].label)}
         <span className={`live-tag ${isLive ? 'live' : 'sim'}`}>{isLive ? T.liveTag : T.simTag}</span>
         <span className="cite-info" tabIndex={0} aria-label={T.citeSource}>
           ⓘ
