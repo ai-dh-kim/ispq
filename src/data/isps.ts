@@ -26,95 +26,17 @@ export const ISP_GROUPS: IspGroup[] = [
       { id: 'skb', name: 'SK 브로드밴드', asns: ['AS9318'] },
     ],
   },
-  {
-    id: 'US',
-    label: '미국',
-    isps: [
-      { id: 'comcast', name: 'Comcast Xfinity', asns: ['AS7922'] },
-      { id: 'charter', name: 'Charter Spectrum', asns: ['AS20115'] },
-      { id: 'att', name: 'AT&T', asns: ['AS7018'] },
-    ],
-  },
-  {
-    id: 'CA',
-    label: '캐나다',
-    isps: [
-      { id: 'bell', name: 'Bell', asns: ['AS577'] },
-      { id: 'rogers', name: 'Rogers', asns: ['AS812'] },
-      { id: 'telus', name: 'Telus', asns: ['AS852'] },
-    ],
-  },
-  {
-    id: 'UK',
-    label: '영국',
-    isps: [
-      { id: 'bt', name: 'BT', asns: ['AS2856'] },
-      { id: 'virgin', name: 'Virgin Media', asns: ['AS5089'] },
-      { id: 'sky', name: 'Sky', asns: ['AS5607'] },
-    ],
-  },
-  {
-    id: 'DE',
-    label: '독일',
-    isps: [
-      { id: 'dtag', name: 'Deutsche Telekom', asns: ['AS3320'] },
-      { id: 'vodafone-de', name: 'Vodafone DE', asns: ['AS3209'] },
-      { id: '1and1', name: '1&1', asns: ['AS8881'] },
-    ],
-  },
-  {
-    id: 'FR',
-    label: '프랑스',
-    isps: [
-      { id: 'orange', name: 'Orange', asns: ['AS3215'] },
-      { id: 'free', name: 'Free/Iliad', asns: ['AS12322'] },
-      { id: 'sfr', name: 'SFR', asns: ['AS15557'] },
-    ],
-  },
-  {
-    id: 'IT',
-    label: '이탈리아',
-    isps: [
-      { id: 'tim', name: 'TIM', asns: ['AS3269'] },
-      { id: 'fastweb', name: 'Fastweb', asns: ['AS12874'] },
-      { id: 'vodafone-it', name: 'Vodafone IT', asns: ['AS30722'] },
-    ],
-  },
-  {
-    id: 'ES',
-    label: '스페인',
-    isps: [
-      { id: 'movistar', name: 'Telefónica/Movistar', asns: ['AS3352'] },
-      { id: 'orange-es', name: 'Orange ES', asns: ['AS12479'] },
-      { id: 'vodafone-es', name: 'Vodafone ES', asns: ['AS12430'] },
-    ],
-  },
-  {
-    id: 'NL',
-    label: '네덜란드',
-    isps: [
-      { id: 'kpn', name: 'KPN', asns: ['AS1136'] },
-      { id: 'ziggo', name: 'VodafoneZiggo', asns: ['AS33915'] },
-    ],
-  },
-  {
-    id: 'JP',
-    label: '일본',
-    isps: [
-      { id: 'ntt', name: 'NTT/OCN', asns: ['AS4713'] },
-      { id: 'kddi', name: 'KDDI/au', asns: ['AS2516'] },
-      { id: 'softbank', name: 'SoftBank', asns: ['AS17676'] },
-    ],
-  },
-  {
-    id: 'AU',
-    label: '호주',
-    isps: [
-      { id: 'telstra', name: 'Telstra', asns: ['AS1221'] },
-      { id: 'tpg', name: 'TPG', asns: ['AS7545'] },
-      { id: 'optus', name: 'Optus', asns: ['AS4804'] },
-    ],
-  },
+  // 해외는 각국 대표(1위) 통신사 1개만 — 데이터 용량·대시보드 정리.
+  { id: 'US', label: '미국', isps: [{ id: 'comcast', name: 'Comcast Xfinity', asns: ['AS7922'] }] },
+  { id: 'CA', label: '캐나다', isps: [{ id: 'bell', name: 'Bell', asns: ['AS577'] }] },
+  { id: 'UK', label: '영국', isps: [{ id: 'bt', name: 'BT', asns: ['AS2856'] }] },
+  { id: 'DE', label: '독일', isps: [{ id: 'dtag', name: 'Deutsche Telekom', asns: ['AS3320'] }] },
+  { id: 'FR', label: '프랑스', isps: [{ id: 'orange', name: 'Orange', asns: ['AS3215'] }] },
+  { id: 'IT', label: '이탈리아', isps: [{ id: 'tim', name: 'TIM', asns: ['AS3269'] }] },
+  { id: 'ES', label: '스페인', isps: [{ id: 'movistar', name: 'Telefónica/Movistar', asns: ['AS3352'] }] },
+  { id: 'NL', label: '네덜란드', isps: [{ id: 'kpn', name: 'KPN', asns: ['AS1136'] }] },
+  { id: 'JP', label: '일본', isps: [{ id: 'ntt', name: 'NTT/OCN', asns: ['AS4713'] }] },
+  { id: 'AU', label: '호주', isps: [{ id: 'telstra', name: 'Telstra', asns: ['AS1221'] }] },
 ];
 
 export interface FlatIsp extends Isp {
