@@ -53,7 +53,7 @@ async function bq(token: string, query: string): Promise<{ rows: string[][]; byt
   const res = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT}/queries`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, useLegacySql: false, timeoutMs: 120000 }),
+    body: JSON.stringify({ query, useLegacySql: false, timeoutMs: 120000, location: 'US' }), // M-Lab 데이터는 US 리전
   });
   const j: any = await res.json();
   if (!res.ok) throw new Error(`bq ${res.status} ${JSON.stringify(j?.error ?? j).slice(0, 300)}`);
