@@ -36,6 +36,27 @@ const MLAB_FIELD: Record<string, 'thr' | 'rtt' | 'loss'> = {
   meanThroughput: 'thr', minRtt: 'rtt', lossRate: 'loss',
 };
 
+// Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
+const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
+type NetflixCache = { perIsp: Record<string, { ym: string; speed: number }[]> };
+async function loadNetflixCache(): Promise<Map<string, { ym: number; speed: number }[]> | null> {
+  try {
+    const j = JSON.parse(await readFile(NF_CACHE, 'utf8')) as NetflixCache;
+    const m = new Map<string, { ym: number; speed: number }[]>();
+    for (const [isp, arr] of Object.entries(j.perIsp ?? {})) {
+      m.set(isp, arr.map((x) => ({ ym: Number(x.ym), speed: x.speed })).sort((a, b) => b.ym - a.ym)); // 최신월 먼저
+    }
+    return m;
+  } catch { return null; }
+}
+// 버킷 시각 t의 월(YYYYMM)에 해당(또는 그 이전 최신) Netflix 월별 값.
+function nfSpeedAt(rows: { ym: number; speed: number }[] | undefined, t: number): number | undefined {
+  if (!rows) return undefined;
+  const d = new Date(t); const ym = d.getUTCFullYear() * 100 + (d.getUTCMonth() + 1);
+  for (const r of rows) if (r.ym <= ym) return r.speed; // 정렬: 최신→과거
+  return undefined;
+}
+
 const FORCE_SIM = process.env.DATA_MODE === 'sim'; // 현재 항상 sim (모크)
 void FORCE_SIM;
 
@@ -283,6 +304,8 @@ async function main() {
   const cf = await buildCfCache(now); // 토큰 있으면 실데이터, 없으면 빈 캐시(시뮬)
   const mlab = await loadMlabCache(); // 하루 1회 캐시(있으면 M-Lab 실데이터)
   if (mlab) console.log(`[mlab] 캐시 로드됨 (ISP ${Object.keys(mlab.perIsp ?? {}).length}개)`);
+  const netflix = await loadNetflixCache(); // Netflix ISP Speed Index 월별 캐시
+  if (netflix) console.log(`[netflix] 캐시 로드됨 (ISP ${netflix.size}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -311,12 +334,16 @@ async function main() {
           const cfReal = cfField ? cf[isp.id]?.[g.key]?.[cfField]?.get(t) : undefined;
           const mlField = MLAB_FIELD[metric.id];
           const mlReal = mlField ? mlab?.perIsp?.[isp.id]?.[g.key]?.[mlField]?.[String(t)] : undefined;
+          const nfReal = metric.id === 'nfSpeedIndex' ? nfSpeedAt(netflix?.get(isp.id), t) : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
           } else if (mlReal && Number.isFinite(mlReal.v)) {
             const clamped = Math.min(Math.max(mlReal.v, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(mlReal.n); k.push(mlReal.n); live++; liveMetricSet.add(metric.id);
+          } else if (nfReal != null && Number.isFinite(nfReal)) {
+            const clamped = Math.min(Math.max(nfReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 월별 인덱스 → 표본수 미상
           } else if (g.key === 'fine') {
             const s = trimmedStats(simulateSamples(isp.id, isp.groupId, metric.id, t), { hard: metric.hard });
             v.push(s.mean == null ? null : round(s.mean));

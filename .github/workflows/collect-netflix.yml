@@ -1,0 +1,43 @@
+# Netflix ISP Speed Index 수집 (하루 1회). 공개 API라 인증/시크릿 불필요.
+# 통신사별 월별 재생 Mbps를 public/netflix_cache.json 에 캐시. 10분 크론(collect.yml)은 이 캐시만 읽는다.
+name: Collect Netflix (daily)
+
+on:
+  schedule:
+    - cron: '41 6 * * *' # 매일 06:41 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: collect-netflix
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  netflix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Fetch Netflix ISP Speed Index → netflix_cache.json
+        run: node scripts/collect-netflix.ts
+
+      - name: Commit cache
+        run: |
+          git config user.name "quality-bot"
+          git config user.email "quality-bot@users.noreply.github.com"
+          git add public/netflix_cache.json
+          if git diff --cached --quiet; then
+            echo "No Netflix cache changes."
+          else
+            git commit -m "chore(data): Netflix daily cache [skip ci]"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
