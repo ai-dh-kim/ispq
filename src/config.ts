@@ -87,6 +87,10 @@ export const T = {
   simTag: '시뮬',
   liveMixed: '일부 실시간',
   liveNote: '실측값 (표본 수 미제공)',
+  // 스냅샷(비시계열) 표
+  snapshotTitle: 'ISP 벤치마크 (기간 집계)',
+  snapshotNote: '※ 시간별 추이가 아니라 최근 90일 대표값(스냅샷)입니다. 시간에 따라 변하지 않습니다.',
+  ispCol: '통신사',
   // 데이터 소스 설정 모달
   apiButton: '데이터 소스',
   apiTitle: '데이터 소스 설정',

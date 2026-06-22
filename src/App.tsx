@@ -11,6 +11,7 @@ import { loadSettings, saveSettings, type ApiSettings as ApiSettingsType } from 
 import { captureElement, timestampName } from './lib/screenshot.ts';
 import IspMultiSelect from './components/IspMultiSelect.tsx';
 import MetricSection from './components/MetricSection.tsx';
+import SnapshotTable from './components/SnapshotTable.tsx';
 import ApiSettings from './components/ApiSettings.tsx';
 
 // 선언 순서 기반 ISP 색상 인덱스.
@@ -158,19 +159,27 @@ export default function App() {
           ) : loading || !data ? (
             <section className="panel"><div className="empty">{T.loading}</div></section>
           ) : (
-            sourceMetrics.map((m) => (
-              <MetricSection
-                key={`${m.id}-${chartResetKey}`}
-                metricId={m.id}
+            <>
+              <SnapshotTable
+                sourceId={sourceId}
                 data={data}
                 selectedIsps={selectedList}
-                view={effectiveView}
-                range={range}
-                sinceMs={sinceMs}
-                theme={theme}
                 colorIndex={colorIndex}
               />
-            ))
+              {sourceMetrics.map((m) => (
+                <MetricSection
+                  key={`${m.id}-${chartResetKey}`}
+                  metricId={m.id}
+                  data={data}
+                  selectedIsps={selectedList}
+                  view={effectiveView}
+                  range={range}
+                  sinceMs={sinceMs}
+                  theme={theme}
+                  colorIndex={colorIndex}
+                />
+              ))}
+            </>
           )}
         </main>
       </div>

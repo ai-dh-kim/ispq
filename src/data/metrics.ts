@@ -50,15 +50,10 @@ export const METRICS: MetricDef[] = [
   // --- Cloudflare Radar ---
   { id: 'latency', name: '지연시간 (RTT)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 idle 지연(RTT) 실측', url: 'https://radar.cloudflare.com/quality' } },
-  { id: 'jitter', name: '지터', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 200 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 지터(RTT 변동) 실측', url: 'https://radar.cloudflare.com/quality' } },
   { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality' } },
   { id: 'httpErrorRate', name: 'HTTP 오류율', source: 'cloudflare', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 },
     cite: { grade: 'B', basis: 'Cloudflare Radar HTTP 데이터셋(AS 차원)의 상태코드 분포 기반 4xx/5xx 비율 집계', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/' } },
-  // 부하 중 지연(버퍼블로트): Cloudflare가 ASN별 idle/loaded 지연을 직접 측정·공개. 최번시 반응성의 핵심.
-  { id: 'loadedLatency', name: '부하 중 지연 (버퍼블로트)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 loaded latency 실측(15분 간격, 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
   // 보장 처리량(하위 25%): Cloudflare가 ASN별 다운로드 25퍼센타일을 직접 공개. "최악 체감 속도".
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality' } },
@@ -101,6 +96,21 @@ export const METRICS: MetricDef[] = [
   { id: 'nfSpeedIndex', name: 'ISP Speed Index (프라임타임 평균)', source: 'netflix', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
 ];
+
+// 스냅샷(비시계열) 지표 — 시간 추이가 없는 "기간 집계 단일값". 시계열 차트가 아니라 표로 표시.
+// Cloudflare Radar speed/summary: ASN별 최근 90일 집계(latencyLoaded·jitter·packetLoss).
+export const SNAPSHOT_METRICS: MetricDef[] = [
+  { id: 'snapLoadedLatency', name: '부하 중 지연 (버퍼블로트)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
+    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 loaded latency 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
+  { id: 'snapJitter', name: '지터', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 1000 },
+    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 loaded jitter 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
+  { id: 'snapPacketLoss', name: '패킷 손실', source: 'cloudflare', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 },
+    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 packet loss 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
+];
+
+export const SNAPSHOT_METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
+  SNAPSHOT_METRICS.map((m) => [m.id, m])
+);
 
 // 값에 해당하는 rating_grade 라벨 (grades 미지정 지표는 null).
 export function gradeFor(metric: MetricDef, v: number | null): string | null {

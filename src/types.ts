@@ -33,6 +33,9 @@ export interface QualityData {
   metrics: string[];
   // series[ispId][metricId] -> SeriesEntry
   series: Record<string, Record<string, SeriesEntry>>;
+  // 스냅샷(비시계열) 지표: 기간 집계 단일값. snapshot[ispId][metricId] -> 값(또는 null).
+  // 시계열이 아니므로 표(SnapshotTable)로 표시한다.
+  snapshot?: Record<string, Record<string, number | null>>;
 }
 
 // One decoded, display-ready point after aggregation + FR-03 derivation.
