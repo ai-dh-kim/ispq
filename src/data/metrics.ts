@@ -97,21 +97,6 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
 ];
 
-// 스냅샷(비시계열) 지표 — 시간 추이가 없는 "기간 집계 단일값". 시계열 차트가 아니라 표로 표시.
-// Cloudflare Radar speed/summary: ASN별 최근 90일 집계(latencyLoaded·jitter·packetLoss).
-export const SNAPSHOT_METRICS: MetricDef[] = [
-  { id: 'snapLoadedLatency', name: '부하 중 지연 (버퍼블로트)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 loaded latency 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
-  { id: 'snapJitter', name: '지터', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 1000 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 loaded jitter 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
-  { id: 'snapPacketLoss', name: '패킷 손실', source: 'cloudflare', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar speed/summary: ASN별 packet loss 실측 (최근 90일 집계)', url: 'https://radar.cloudflare.com/quality' } },
-];
-
-export const SNAPSHOT_METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
-  SNAPSHOT_METRICS.map((m) => [m.id, m])
-);
-
 // 값에 해당하는 rating_grade 라벨 (grades 미지정 지표는 null).
 export function gradeFor(metric: MetricDef, v: number | null): string | null {
   if (!metric.grades || v == null) return null;

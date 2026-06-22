@@ -11,7 +11,6 @@ import { loadSettings, saveSettings, type ApiSettings as ApiSettingsType } from 
 import { captureElement, timestampName } from './lib/screenshot.ts';
 import IspMultiSelect from './components/IspMultiSelect.tsx';
 import MetricSection from './components/MetricSection.tsx';
-import SnapshotTable from './components/SnapshotTable.tsx';
 import ApiSettings from './components/ApiSettings.tsx';
 
 // 선언 순서 기반 ISP 색상 인덱스.
@@ -144,6 +143,12 @@ export default function App() {
                   {T.grid}: {data.tiers[tier].baseMin}분 · {T.retention}: 365일
                 </p>
               )}
+              {mode === 'live' && (
+                <div className="delay-note">
+                  <div className="delay-title">{T.delayTitle}</div>
+                  <div className="delay-body">{T.delayBody}</div>
+                </div>
+              )}
             </>
           )}
         </aside>
@@ -159,27 +164,19 @@ export default function App() {
           ) : loading || !data ? (
             <section className="panel"><div className="empty">{T.loading}</div></section>
           ) : (
-            <>
-              <SnapshotTable
-                sourceId={sourceId}
+            sourceMetrics.map((m) => (
+              <MetricSection
+                key={`${m.id}-${chartResetKey}`}
+                metricId={m.id}
                 data={data}
                 selectedIsps={selectedList}
+                view={effectiveView}
+                range={range}
+                sinceMs={sinceMs}
+                theme={theme}
                 colorIndex={colorIndex}
               />
-              {sourceMetrics.map((m) => (
-                <MetricSection
-                  key={`${m.id}-${chartResetKey}`}
-                  metricId={m.id}
-                  data={data}
-                  selectedIsps={selectedList}
-                  view={effectiveView}
-                  range={range}
-                  sinceMs={sinceMs}
-                  theme={theme}
-                  colorIndex={colorIndex}
-                />
-              ))}
-            </>
+            ))
           )}
         </main>
       </div>

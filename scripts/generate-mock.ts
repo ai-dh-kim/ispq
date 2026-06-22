@@ -247,43 +247,6 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
   return cache;
 }
 
-// ---- 스냅샷(비시계열) — Cloudflare speed/summary: ASN별 최근 90일 집계 단일값 ----
-const CF_SPEED_API = 'https://api.cloudflare.com/client/v4/radar/quality/speed/summary';
-const cfSnapLog = { done: false };
-async function cfSpeedSummary(asns: string[]): Promise<{ loadedLatency: number | null; jitter: number | null; packetLoss: number | null }> {
-  const url = new URL(CF_SPEED_API);
-  url.searchParams.set('asn', asns.map((a) => a.replace(/^AS/i, '')).join(','));
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
-  const json: any = await res.json();
-  const s = json?.result?.summary_0;
-  if (!s) throw new Error('no summary_0');
-  if (!cfSnapLog.done) { console.log(`[cf-snap] summary_0=${JSON.stringify(s)}`); cfSnapLog.done = true; }
-  const num = (x: unknown) => (x == null ? null : Number(x));
-  return { loadedLatency: num(s.latencyLoaded), jitter: num(s.jitterLoaded ?? s.jitterIdle), packetLoss: num(s.packetLoss) };
-}
-
-async function buildSnapshot(): Promise<Record<string, Record<string, number | null>>> {
-  const snap: Record<string, Record<string, number | null>> = {};
-  let ok = 0, fail = 0;
-  for (const isp of ALL_ISPS) {
-    let real: { loadedLatency: number | null; jitter: number | null; packetLoss: number | null } | null = null;
-    if (CF_TOKEN) {
-      try { real = await cfSpeedSummary(isp.asns); ok++; }
-      catch (e) { fail++; console.warn(`[cf-snap] ${isp.id} skip: ${(e as Error).message}`); }
-    }
-    const rand = rng(`${isp.id}|snapshot`);
-    const tier = REGION_TIER[isp.groupId] ?? 0.8;
-    snap[isp.id] = {
-      snapLoadedLatency: real?.loadedLatency ?? round(40 + (1 - tier) * 120 + gaussian(rand) * 15),
-      snapJitter: real?.jitter ?? round(3 + (1 - tier) * 15 + Math.abs(gaussian(rand)) * 3),
-      snapPacketLoss: real?.packetLoss ?? round(Math.max(0, 0.2 + (1 - tier) * 1.5 + gaussian(rand) * 0.3)),
-    };
-  }
-  if (CF_TOKEN) console.log(`[cf-snap] speed/summary 호출 ok=${ok} fail=${fail}`);
-  return snap;
-}
-
 // ---- 티어 조립 ----
 interface TierGen { key: TierKey; baseMin: number; days: number; }
 const TIER_GEN: TierGen[] = [
@@ -351,8 +314,6 @@ async function main() {
     }
   }
 
-  const snapshot = await buildSnapshot(); // 비시계열 스냅샷(Cloudflare speed/summary 90일 집계)
-
   const payload: QualityData = {
     generatedAt: new Date().toISOString(),
     mode: live > 0 ? 'live' : 'sim', // 실데이터 셀이 하나라도 있으면 live(혼합)
@@ -361,7 +322,6 @@ async function main() {
     isps: ALL_ISPS.map((i) => i.id),
     metrics: METRICS.map((m) => m.id),
     series,
-    snapshot,
   };
 
   await mkdir(dirname(OUT), { recursive: true });
