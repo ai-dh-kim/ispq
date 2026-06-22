@@ -49,20 +49,23 @@ async function getAccessToken(sa: { client_email: string; private_key: string })
   return (await res.json() as { access_token: string }).access_token;
 }
 
-async function bq(token: string, query: string): Promise<{ rows: string[][]; bytes: number }> {
+async function bq(token: string, query: string, dryRun = false): Promise<{ rows: string[][]; bytes: number }> {
   const res = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT}/queries`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, useLegacySql: false, timeoutMs: 120000, location: 'US' }), // M-Lab 데이터는 US 리전
+    body: JSON.stringify({ query, useLegacySql: false, timeoutMs: 120000, location: 'US', dryRun }), // US 리전 · dryRun=무과금 추정
   });
   const j: any = await res.json();
   if (!res.ok) throw new Error(`bq ${res.status} ${JSON.stringify(j?.error ?? j).slice(0, 300)}`);
   const bytes = Number(j.totalBytesProcessed || 0);
+  if (dryRun) return { rows: [], bytes }; // 추정만(실행·과금 없음)
   if (!j.jobComplete) throw new Error('query timeout — 기간을 줄이세요');
   if (j.pageToken) console.warn('[mlab] 결과가 페이지네이션됨 — 일부 버킷 누락 가능(기간/버킷 조정 권장)');
   const rows: string[][] = (j.rows ?? []).map((r: any) => r.f.map((c: any) => c.v));
   return { rows, bytes };
 }
+
+const CAP_GB = 50; // 쿼리당 스캔 상한(안전). 초과 시 중단 — 의도치 않은 대량 과금 방지.
 
 // 한 티어 쿼리: bucketExpr(버킷 시작 ms), days(기간 상한)
 function buildQuery(bucketExpr: string, days: number): string {
@@ -92,6 +95,17 @@ async function main() {
   const sa = JSON.parse(KEY) as { client_email: string; private_key: string };
   const token = await getAccessToken(sa);
   console.log(`[mlab] auth OK · project=${PROJECT} · ASN ${ASN_LIST.length}개`);
+
+  // ── 비용 사전 점검: dry-run(무과금)으로 예상 스캔량 먼저 확인, 상한 초과 시 중단 ──
+  let estTotal = 0;
+  for (const t of TIERS) {
+    const { bytes } = await bq(token, buildQuery(t.bucket, t.days), true);
+    estTotal += bytes;
+    const gb = bytes / 1e9;
+    console.log(`[mlab] ${t.key} 예상 스캔 ${gb.toFixed(2)}GB (dry-run·무과금)`);
+    if (gb > CAP_GB) { console.error(`[mlab] ${t.key} 예상 ${gb.toFixed(1)}GB > 상한 ${CAP_GB}GB → 중단(기간 축소 필요)`); process.exit(1); }
+  }
+  console.log(`[mlab] 총 예상 ${(estTotal / 1e9).toFixed(2)}GB/회 → 일1회 가정 월 ~${(estTotal / 1e9 * 30).toFixed(0)}GB (무료 1000GB/월 대비)`);
 
   // perIsp[ispId][tier] = { thr: TierMetricMap, rtt:..., loss:... }
   const perIsp: Record<string, Record<string, Record<string, TierMetricMap>>> = {};
