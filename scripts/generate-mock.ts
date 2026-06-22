@@ -198,14 +198,30 @@ async function cfTimeseries(
     if (a50[i] != null) p50.set(bucket, Number(a50[i]));
     if (a25[i] != null) p25.set(bucket, Number(a25[i]));
   });
-  return { p50, p25 };
+  // IQI 간격(15분/1시간)이 티어 그리드(10분 등)보다 성기면 forward-fill로 빈 버킷을 직전 값으로 채워
+  // 연속 라인을 만든다(예: fine 10분 그리드에 15분 데이터).
+  return { p50: fillForward(p50, stepMs), p25: fillForward(p25, stepMs) };
 }
 
-// cfCache[ispId][tierKey] = CfTierData. mid/coarse만 채운다(fine은 IQI 최소 간격 15분과 그리드 불일치로 시뮬 유지).
+// 첫~마지막 관측 사이의 빈 버킷을 직전 값으로 채움(이전은 비움 → 시뮬 폴백).
+function fillForward(sparse: Map<number, number>, stepMs: number): Map<number, number> {
+  if (sparse.size === 0) return sparse;
+  const keys = [...sparse.keys()].sort((a, b) => a - b);
+  const out = new Map<number, number>();
+  let last: number | undefined;
+  for (let t = keys[0]; t <= keys[keys.length - 1]; t += stepMs) {
+    if (sparse.has(t)) last = sparse.get(t);
+    if (last != null) out.set(t, last);
+  }
+  return out;
+}
+
+// cfCache[ispId][tierKey] = CfTierData. fine/mid/coarse 모두 채운다(fine은 15분 IQI를 10분 그리드에 forward-fill).
 async function buildCfCache(now: number): Promise<Record<string, Partial<Record<TierKey, CfTierData>>>> {
   const cache: Record<string, Partial<Record<TierKey, CfTierData>>> = {};
   if (!CF_TOKEN) { console.log('[cf] CLOUDFLARE_API_TOKEN 없음 → 전부 시뮬레이션'); return cache; }
   const tiers: { key: TierKey; agg: string; days: number; stepMs: number }[] = [
+    { key: 'fine', agg: '15m', days: 2, stepMs: TIER_BASE_MIN.fine * 60 * 1000 },
     { key: 'mid', agg: '1h', days: 30, stepMs: 60 * 60 * 1000 },
     { key: 'coarse', agg: '1d', days: 90, stepMs: DAY },
   ];
@@ -274,23 +290,21 @@ async function main() {
         const n: (number | null)[] = [];
         const k: (number | null)[] = [];
         for (const t of axis) {
-          if (g.key === 'fine') {
+          // 실데이터(Cloudflare IQI) 우선(모든 티어), 없으면 시뮬 폴백. 실데이터 셀은 표본 수 미상(n/k=null).
+          const field = CF_METRIC_FIELD[metric.id];
+          const real = field ? cf[isp.id]?.[g.key]?.[field]?.get(t) : undefined;
+          if (real != null && Number.isFinite(real)) {
+            const clamped = Math.min(Math.max(real, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++;
+          } else if (g.key === 'fine') {
             const s = trimmedStats(simulateSamples(isp.id, isp.groupId, metric.id, t), { hard: metric.hard });
             v.push(s.mean == null ? null : round(s.mean));
             n.push(s.totalSamples);
             k.push(s.kept);
           } else {
-            // 실데이터(Cloudflare IQI) 우선, 없으면 시뮬 폴백. 실데이터 셀은 표본 수 미상(n/k=null).
-            const field = CF_METRIC_FIELD[metric.id];
-            const real = field ? cf[isp.id]?.[g.key]?.[field]?.get(t) : undefined;
-            if (real != null && Number.isFinite(real)) {
-              const clamped = Math.min(Math.max(real, metric.hard.min), metric.hard.max);
-              v.push(round(clamped)); n.push(null); k.push(null); live++;
-            } else {
-              const rand = rng(`${isp.id}|${metric.id}|${g.key}|${t}`);
-              const a = synthAggregate(isp.id, isp.groupId, metric.id, t, g.key, rand);
-              v.push(a.mean); n.push(a.n); k.push(a.k);
-            }
+            const rand = rng(`${isp.id}|${metric.id}|${g.key}|${t}`);
+            const a = synthAggregate(isp.id, isp.groupId, metric.id, t, g.key, rand);
+            v.push(a.mean); n.push(a.n); k.push(a.k);
           }
           points++;
         }
