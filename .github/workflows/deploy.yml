@@ -1,0 +1,45 @@
+# 코드 변경을 GitHub Pages로 자동 빌드·배포.
+# 데이터(quality_data.json)는 런타임에 raw URL에서 가져오므로, 10분 데이터 커밋([skip ci])은
+# 이 워크플로를 트리거하지 않는다 — 코드가 실제로 바뀐 push에서만 재배포된다.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시 배포 1건만 — 새 푸시가 오면 진행 중 배포는 취소.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build # tsc --noEmit && vite build → dist/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
