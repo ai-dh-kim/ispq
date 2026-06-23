@@ -98,6 +98,7 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   cwnd: { good: 4200, spread: 0.3, busy: -0.2 },
   pacingRate: { good: 900, spread: 0.2, busy: -0.2 },
   ipv6: { good: 40, spread: 0.1, busy: 0 }, // IPv6 채택률(%): 시간대 무관, 지역별 차이
+  dnsResponse: { good: 18, spread: 0.3, busy: 0.4 }, // DNS 응답시간(ms): 낮을수록 좋음
   // Netflix 스트리밍 품질: HD/4K 가능 비율은 부하에 떨어지고(4K가 더 민감), Speed Index(Mbps)도 소폭 하락.
   nfHd: { good: 96, spread: 0.03, busy: -0.12 },
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
@@ -193,10 +194,10 @@ function synthAggregate(ispId: string, groupId: string, metricId: string, t: num
 const CF_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const CF_API = 'https://api.cloudflare.com/client/v4/radar/quality/iqi/timeseries_groups';
 const CF_HTTP_IPV6_API = 'https://api.cloudflare.com/client/v4/radar/http/timeseries_groups/ip_version';
-const CF_METRIC_FIELD: Record<string, 'latency' | 'bandwidth' | 'p25' | 'ipv6'> = {
-  latency: 'latency', bandwidth: 'bandwidth', p25Throughput: 'p25', ipv6: 'ipv6',
+const CF_METRIC_FIELD: Record<string, 'latency' | 'bandwidth' | 'p25' | 'ipv6' | 'dns'> = {
+  latency: 'latency', bandwidth: 'bandwidth', p25Throughput: 'p25', ipv6: 'ipv6', dnsResponse: 'dns',
 };
-interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, number>; p25: Map<number, number>; ipv6: Map<number, number>; }
+interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, number>; p25: Map<number, number>; ipv6: Map<number, number>; dns: Map<number, number>; }
 const cfLog = { done: false };
 const isoSec = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -211,7 +212,7 @@ async function cfGet(url: URL): Promise<any> {
 }
 
 async function cfTimeseries(
-  asns: string[], metric: 'LATENCY' | 'BANDWIDTH', aggInterval: string,
+  asns: string[], metric: 'LATENCY' | 'BANDWIDTH' | 'DNS', aggInterval: string,
   dateStart: string, dateEnd: string, stepMs: number,
 ): Promise<{ p50: Map<number, number>; p25: Map<number, number> }> {
   const url = new URL(CF_API);
@@ -293,7 +294,7 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
     for (const t of tiers) {
       const ds = isoSec(now - t.days * DAY);
       const de = isoSec(now);
-      const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map(), ipv6: new Map() };
+      const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map(), ipv6: new Map(), dns: new Map() };
       try {
         const lat = await cfTimeseries(isp.asns, 'LATENCY', t.agg, ds, de, t.stepMs);
         data.latency = lat.p50; ok++;
@@ -302,6 +303,10 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
         const bw = await cfTimeseries(isp.asns, 'BANDWIDTH', t.agg, ds, de, t.stepMs);
         data.bandwidth = bw.p50; data.p25 = bw.p25; ok++;
       } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/BANDWIDTH skip: ${(e as Error).message}`); }
+      try {
+        const dns = await cfTimeseries(isp.asns, 'DNS', t.agg, ds, de, t.stepMs);
+        data.dns = dns.p50; ok++;
+      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/DNS skip: ${(e as Error).message}`); }
       try {
         data.ipv6 = await cfIpv6Timeseries(isp.asns, t.agg, ds, de, t.stepMs); ok++;
       } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/IPv6 skip: ${(e as Error).message}`); }
