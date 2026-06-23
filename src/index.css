@@ -85,8 +85,9 @@ label.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; 
 @media (max-width: 900px) { .content { grid-template-columns: 1fr; } }
 
 /* ISP 선택 패널 고정: 차트를 스크롤해도 왼쪽에 그대로 유지 */
-aside.panel { position: sticky; top: 12px; align-self: start; max-height: calc(100vh - 24px); overflow-y: auto; }
-@media (max-width: 900px) { aside.panel { position: static; max-height: none; } }
+/* 고정하되 overflow는 두지 않음 — 안 그러면 ISP 드롭다운(absolute)이 사이드바 높이에 잘림 */
+aside.panel { position: sticky; top: 12px; align-self: start; }
+@media (max-width: 900px) { aside.panel { position: static; } }
 
 .panel h2.collapsible { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
 .panel h2.collapsible .caret { font-size: 11px; }
