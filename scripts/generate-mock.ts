@@ -97,17 +97,13 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   lossRate: { good: 0.1, spread: 1.0, busy: 2.0 },
   cwnd: { good: 4200, spread: 0.3, busy: -0.2 },
   pacingRate: { good: 900, spread: 0.2, busy: -0.2 },
-  pingAvg: { good: 9, spread: 0.25, busy: 0.4 },
-  availability: { good: 99.95, spread: 0.02, busy: -0.05 },
-  hops: { good: 11, spread: 0.15, busy: 0.05 },
-  asPathFlaps: { good: 0.2, spread: 1.2, busy: 1.0 },
-  dnsResolve: { good: 18, spread: 0.3, busy: 0.5 },
+  ipv6: { good: 40, spread: 0.1, busy: 0 }, // IPv6 채택률(%): 시간대 무관, 지역별 차이
   // Netflix 스트리밍 품질: HD/4K 가능 비율은 부하에 떨어지고(4K가 더 민감), Speed Index(Mbps)도 소폭 하락.
   nfHd: { good: 96, spread: 0.03, busy: -0.12 },
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'uploadThroughput', 'cwnd', 'pacingRate', 'availability', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'uploadThroughput', 'cwnd', 'pacingRate', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)
@@ -196,10 +192,11 @@ function synthAggregate(ispId: string, groupId: string, metricId: string, t: num
 // IQI 최대 이력 ~90일 → coarse(365일)는 최근 90일만 실데이터.
 const CF_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const CF_API = 'https://api.cloudflare.com/client/v4/radar/quality/iqi/timeseries_groups';
-const CF_METRIC_FIELD: Record<string, 'latency' | 'bandwidth' | 'p25'> = {
-  latency: 'latency', bandwidth: 'bandwidth', p25Throughput: 'p25',
+const CF_HTTP_IPV6_API = 'https://api.cloudflare.com/client/v4/radar/http/timeseries_groups/ip_version';
+const CF_METRIC_FIELD: Record<string, 'latency' | 'bandwidth' | 'p25' | 'ipv6'> = {
+  latency: 'latency', bandwidth: 'bandwidth', p25Throughput: 'p25', ipv6: 'ipv6',
 };
-interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, number>; p25: Map<number, number>; }
+interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, number>; p25: Map<number, number>; ipv6: Map<number, number>; }
 const cfLog = { done: false };
 const isoSec = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -237,6 +234,31 @@ async function cfTimeseries(
   return { p50: fillForward(p50, stepMs), p25: fillForward(p25, stepMs) };
 }
 
+// Cloudflare HTTP ip_version: ASN별 IPv6 트래픽 비율(%) 시계열.
+async function cfIpv6Timeseries(
+  asns: string[], aggInterval: string, dateStart: string, dateEnd: string, stepMs: number,
+): Promise<Map<number, number>> {
+  const url = new URL(CF_HTTP_IPV6_API);
+  url.searchParams.set('asn', asns.map((a) => a.replace(/^AS/i, '')).join(','));
+  url.searchParams.set('aggInterval', aggInterval);
+  url.searchParams.set('dateStart', dateStart);
+  url.searchParams.set('dateEnd', dateEnd);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
+  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
+  const json: any = await res.json();
+  const serie = json?.result?.serie_0;
+  if (!serie || !Array.isArray(serie.timestamps)) throw new Error('no serie_0');
+  if (!cfIpv6Log.done) { console.log(`[cf-ipv6] serieKeys=${Object.keys(serie)} firstIPv6=${serie.IPv6?.[0]}`); cfIpv6Log.done = true; }
+  const m = new Map<number, number>();
+  const a6: unknown[] = serie.IPv6 ?? [];
+  serie.timestamps.forEach((ts: string, i: number) => {
+    const bucket = Math.floor(new Date(ts).getTime() / stepMs) * stepMs;
+    if (a6[i] != null) m.set(bucket, Number(a6[i]));
+  });
+  return fillForward(m, stepMs);
+}
+const cfIpv6Log = { done: false };
+
 // 첫~마지막 관측 사이의 빈 버킷을 직전 값으로 채움(이전은 비움 → 시뮬 폴백).
 function fillForward(sparse: Map<number, number>, stepMs: number): Map<number, number> {
   if (sparse.size === 0) return sparse;
@@ -265,7 +287,7 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
     for (const t of tiers) {
       const ds = isoSec(now - t.days * DAY);
       const de = isoSec(now);
-      const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map() };
+      const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map(), ipv6: new Map() };
       try {
         const lat = await cfTimeseries(isp.asns, 'LATENCY', t.agg, ds, de, t.stepMs);
         data.latency = lat.p50; ok++;
@@ -274,6 +296,9 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
         const bw = await cfTimeseries(isp.asns, 'BANDWIDTH', t.agg, ds, de, t.stepMs);
         data.bandwidth = bw.p50; data.p25 = bw.p25; ok++;
       } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/BANDWIDTH skip: ${(e as Error).message}`); }
+      try {
+        data.ipv6 = await cfIpv6Timeseries(isp.asns, t.agg, ds, de, t.stepMs); ok++;
+      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/IPv6 skip: ${(e as Error).message}`); }
       cache[isp.id][t.key] = data;
     }
   }

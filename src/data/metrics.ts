@@ -33,7 +33,6 @@ export interface MetricDef {
 export const SOURCES: Record<string, SourceDef> = {
   cloudflare: { id: 'cloudflare', label: 'Cloudflare Radar' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
-  ripe: { id: 'ripe', label: 'RIPE Atlas' },
   netflix: { id: 'netflix', label: 'Netflix 스트리밍 품질 (ISP Speed Index)' },
 };
 
@@ -57,6 +56,9 @@ export const METRICS: MetricDef[] = [
   // 보장 처리량(하위 25%): Cloudflare가 ASN별 다운로드 25퍼센타일을 직접 공개. "최악 체감 속도".
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality' } },
+  // IPv6 채택률: ISP 망 현대화 수준(높을수록 최신). Cloudflare가 ASN별 IPv6 트래픽 비율을 시계열로 공개.
+  { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
+    cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/' } },
 
   // --- M-Lab (ndt7) ---
   { id: 'meanThroughput', name: '평균 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
@@ -72,18 +74,6 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 혼잡 윈도우(tcpi_snd_cwnd) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
   { id: 'pacingRate', name: '페이싱 레이트', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 페이싱 레이트(tcpi_pacing_rate) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
-
-  // --- RIPE Atlas ---
-  { id: 'pingAvg', name: 'Ping 평균 RTT', source: 'ripe', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
-    cite: { grade: 'A', basis: 'RIPE Atlas ping 측정 RTT 실측(프로브는 각 ISP 망에 위치)', url: 'https://atlas.ripe.net/docs/built-in-measurements/' } },
-  { id: 'availability', name: '가용성', source: 'ripe', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
-    cite: { grade: 'B', basis: 'RIPE Atlas ping 성공 비율로 산출한 가용성 집계', url: 'https://atlas.ripe.net/docs/built-in-measurements/' } },
-  { id: 'hops', name: '트레이스라우트 홉 수', source: 'ripe', unit: '홉', higherIsBetter: false, hard: { min: 1, max: 40 },
-    cite: { grade: 'A', basis: 'RIPE Atlas traceroute 홉 수 실측', url: 'https://atlas.ripe.net/docs/built-in-measurements/' } },
-  { id: 'asPathFlaps', name: 'AS 경로 변동', source: 'ripe', unit: '회', higherIsBetter: false, hard: { min: 0, max: 50 },
-    cite: { grade: 'B', basis: 'RIPE Atlas traceroute/토폴로지 스캔의 경로 변화 횟수 집계', url: 'https://atlas.ripe.net/docs/built-in-measurements/' } },
-  { id: 'dnsResolve', name: 'DNS 응답시간', source: 'ripe', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
-    cite: { grade: 'A', basis: 'RIPE Atlas DNS 측정 응답시간 실측', url: 'https://atlas.ripe.net/docs/built-in-measurements/' } },
 
   // --- Netflix 스트리밍 품질 ---
   // hd_verified_percentage: HD(1080p) 재생 가능 비율(지속 처리량 ≥ 5Mbps). 등급(rating_grade) 산출 기준.

@@ -30,6 +30,8 @@ const CHROME = {
   dark: { fore: '#b0b0b0', grid: '#333333' },
   light: { fore: '#555555', grid: '#e0e0e0' },
 };
+// 시리즈별 선 스타일(점선 길이). 색이 같은 위치에서 겹쳐도 구분되도록.
+const DASH_PATTERN = [0, 6, 2, 10, 4, 8];
 
 interface PointMeta { total: number | null; trimmed: number | null; retained: number | null; low: boolean; }
 type DataPoint = { x: number; y: number | null; meta: PointMeta };
@@ -48,9 +50,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const maxMs = axis && axis.length ? axis[axis.length - 1] : sinceMs;
   const effSince = FIXED180 ? maxMs - 180 * 86400000 : sinceMs;
 
-  const { series, colors, discrete } = useMemo(() => {
+  const { series, colors, discrete, dashArray } = useMemo(() => {
     const series: { name: string; data: DataPoint[] }[] = [];
     const colors: string[] = [];
+    const dashArray: number[] = [];
     const discrete: { seriesIndex: number; dataPointIndex: number; size: number; fillColor: string; strokeColor: string }[] = [];
     let si = 0;
     for (const ispId of selectedIsps) {
@@ -67,12 +70,13 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         })),
       });
       colors.push(color);
+      dashArray.push(DASH_PATTERN[si % DASH_PATTERN.length]); // 시리즈별 선 스타일 → 겹쳐도 구분
       pts.forEach((p, di) => {
         if (p.low) discrete.push({ seriesIndex: si, dataPointIndex: di, size: 5, fillColor: '#ffb300', strokeColor: color });
       });
       si++;
     }
-    return { series, colors, discrete };
+    return { series, colors, discrete, dashArray };
   }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex]);
 
   const chrome = CHROME[theme];
@@ -89,7 +93,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     },
     theme: { mode: theme },
     colors,
-    stroke: { width: 2, curve: 'straight' },
+    stroke: { width: 2, curve: FIXED180 ? 'stepline' : 'straight', dashArray },
     markers: { size: 0, discrete },
     xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: effSince, max: maxMs },
     yaxis: {
@@ -136,7 +140,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, metric, chrome, effSince, maxMs]);
+  }), [theme, colors, discrete, dashArray, metric, chrome, effSince, maxMs, FIXED180]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;
