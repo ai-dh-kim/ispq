@@ -353,6 +353,12 @@ async function main() {
   for (const isp of ALL_ISPS) {
     series[isp.id] = {};
     for (const metric of METRICS) {
+      // 이 지표가 이번 실행에서 "실데이터 연동" 상태인지(=실어댑터가 켜짐). 그러면 데이터 없는 구간은
+      // 시뮬로 채우지 않고 빈칸으로 둔다(가짜 값으로 인한 해석 혼선 방지). 비연동이면 기존대로 시뮬.
+      const liveConnected =
+        (CF_METRIC_FIELD[metric.id] != null && !!CF_TOKEN) ||
+        (MLAB_FIELD[metric.id] != null && !!mlab) ||
+        (metric.id === 'nfSpeedIndex' && !!netflix);
       const entry = {} as Record<TierKey, TierBlock>;
       for (const g of TIER_GEN) {
         const axis = tiers[g.key].t;
@@ -375,8 +381,8 @@ async function main() {
           } else if (nfReal != null && Number.isFinite(nfReal)) {
             const clamped = Math.min(Math.max(nfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 월별 인덱스 → 표본수 미상
-          } else if (metric.id === 'nfSpeedIndex') {
-            // 월별 실데이터(약 6개월)만 표시 — 데이터 없는 구간은 시뮬로 채우지 않고 빈칸.
+          } else if (liveConnected) {
+            // 실데이터 연동 지표인데 해당 시점 데이터 없음 → 시뮬로 채우지 않고 빈칸(혼선 방지).
             v.push(null); n.push(null); k.push(null);
           } else if (g.key === 'fine') {
             const s = trimmedStats(simulateSamples(isp.id, isp.groupId, metric.id, t), { hard: metric.hard });
