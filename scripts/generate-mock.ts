@@ -200,6 +200,16 @@ interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, numb
 const cfLog = { done: false };
 const isoSec = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
+// Cloudflare GET + 429(레이트리밋) 백오프 재시도. 호출이 많아도 데이터 빠짐 방지.
+async function cfGet(url: URL): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
+    if (res.status === 429 && attempt < 3) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+    if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
+    return res.json();
+  }
+}
+
 async function cfTimeseries(
   asns: string[], metric: 'LATENCY' | 'BANDWIDTH', aggInterval: string,
   dateStart: string, dateEnd: string, stepMs: number,
@@ -210,9 +220,7 @@ async function cfTimeseries(
   url.searchParams.set('aggInterval', aggInterval);
   url.searchParams.set('dateStart', dateStart);
   url.searchParams.set('dateEnd', dateEnd);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
-  const json: any = await res.json();
+  const json: any = await cfGet(url);
   const serie = json?.result?.serie_0;
   if (!serie || !Array.isArray(serie.timestamps)) throw new Error('no serie_0');
   if (!cfLog.done) {
@@ -243,9 +251,7 @@ async function cfIpv6Timeseries(
   url.searchParams.set('aggInterval', aggInterval);
   url.searchParams.set('dateStart', dateStart);
   url.searchParams.set('dateEnd', dateEnd);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
-  const json: any = await res.json();
+  const json: any = await cfGet(url);
   const serie = json?.result?.serie_0;
   if (!serie || !Array.isArray(serie.timestamps)) throw new Error('no serie_0');
   if (!cfIpv6Log.done) { console.log(`[cf-ipv6] serieKeys=${Object.keys(serie)} firstIPv6=${serie.IPv6?.[0]}`); cfIpv6Log.done = true; }
