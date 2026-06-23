@@ -22,9 +22,13 @@ const PROJECT = process.env.MLAB_BQ_PROJECT;
 
 // 대상 ASN(정수). ALL_ISPS 의 asns 에서 "AS" 접두 제거.
 const ASN_LIST = [...new Set(ALL_ISPS.flatMap((i) => i.asns.map((a) => Number(a.replace(/^AS/i, '')))))].filter((n) => Number.isFinite(n));
-// ASNumber -> ispId (다중 ASN ISP 합산용)
-const ASN_TO_ISP: Record<number, string> = {};
-for (const isp of ALL_ISPS) for (const a of isp.asns) ASN_TO_ISP[Number(a.replace(/^AS/i, ''))] = isp.id;
+// ASNumber -> ispId[] (1:다). 한 ASN이 통합 entry(lgu)와 unit entry(lgu-3786 등)에 동시 기여.
+// 1:1로 하면 같은 ASN을 공유하는 통합 lgu가 unit에 덮어써져 M-Lab 데이터를 못 받는다.
+const ASN_TO_ISPS: Record<number, string[]> = {};
+for (const isp of ALL_ISPS) for (const a of isp.asns) {
+  const n = Number(a.replace(/^AS/i, ''));
+  (ASN_TO_ISPS[n] ??= []).push(isp.id);
+}
 
 const b64url = (x: Buffer | string) => Buffer.from(x).toString('base64url');
 
@@ -69,11 +73,15 @@ const CAP_GB = 50; // 쿼리당 스캔 상한(안전). 초과 시 중단 — 의
 
 // 한 티어 쿼리: bucketExpr(버킷 시작 ms), days(기간 상한)
 function buildQuery(bucketExpr: string, days: number): string {
+  // hd/k4: 다운로드 처리량이 Netflix 권장 HD(5Mbps)/4K(15Mbps) 이상인 측정의 비율(%).
+  // 같은 쿼리 안에서 COUNTIF로 파생 → 추가 스캔 비용 0.
   return `SELECT client.Network.ASNumber AS asn,
   ${bucketExpr} AS bucket,
   APPROX_QUANTILES(a.MeanThroughputMbps, 100)[OFFSET(50)] AS thr,
   APPROX_QUANTILES(a.MinRTT, 100)[OFFSET(50)] AS rtt,
   AVG(a.LossRate) AS loss,
+  COUNTIF(a.MeanThroughputMbps >= 5) AS hd_n,
+  COUNTIF(a.MeanThroughputMbps >= 15) AS k4_n,
   COUNT(*) AS n
 FROM \`measurement-lab.ndt.ndt7\`
 WHERE date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY) AND CURRENT_DATE()
@@ -107,7 +115,7 @@ async function main() {
   }
   console.log(`[mlab] 총 예상 ${(estTotal / 1e9).toFixed(2)}GB/회 → 일1회 가정 월 ~${(estTotal / 1e9 * 30).toFixed(0)}GB (무료 1000GB/월 대비)`);
 
-  // perIsp[ispId][tier] = { thr: TierMetricMap, rtt:..., loss:... }
+  // perIsp[ispId][tier] = { thr: TierMetricMap, rtt:..., loss:..., hd:..., k4:... }
   const perIsp: Record<string, Record<string, Record<string, TierMetricMap>>> = {};
   let totalBytes = 0;
 
@@ -115,23 +123,30 @@ async function main() {
     const { rows, bytes } = await bq(token, buildQuery(t.bucket, t.days));
     totalBytes += bytes;
     console.log(`[mlab] ${t.key}: rows=${rows.length} scanned=${(bytes / 1e9).toFixed(2)}GB`);
-    // 다중 ASN ISP 합산: n 가중평균
-    const acc: Record<string, Record<string, Record<number, { sw: number; n: number; thr: number; rtt: number; loss: number }>>> = {};
+    // 다중 ASN ISP 합산: thr/rtt/loss는 n 가중평균, hd/k4는 카운트 합산.
+    // 한 ASN이 여러 ISP entry(통합 lgu + lgu-3786 등)에 동시 기여 → 1:다.
+    const acc: Record<string, Record<string, Record<number, { sw: number; n: number; thr: number; rtt: number; loss: number; hd: number; k4: number }>>> = {};
     for (const r of rows) {
       const asn = Number(r[0]); const bucket = Number(r[1]);
-      const thr = Number(r[2]); const rtt = Number(r[3]); const loss = Number(r[4]); const n = Number(r[5]);
-      const isp = ASN_TO_ISP[asn]; if (!isp || !n) continue;
-      acc[isp] ??= {}; acc[isp][t.key] ??= {};
-      const cur = acc[isp][t.key][bucket] ??= { sw: 0, n: 0, thr: 0, rtt: 0, loss: 0 };
-      cur.sw += n; cur.n += n; cur.thr += thr * n; cur.rtt += rtt * n; cur.loss += loss * n;
+      const thr = Number(r[2]); const rtt = Number(r[3]); const loss = Number(r[4]);
+      const hd = Number(r[5]); const k4 = Number(r[6]); const n = Number(r[7]);
+      const isps = ASN_TO_ISPS[asn]; if (!isps || !n) continue;
+      for (const isp of isps) {
+        acc[isp] ??= {}; acc[isp][t.key] ??= {};
+        const cur = acc[isp][t.key][bucket] ??= { sw: 0, n: 0, thr: 0, rtt: 0, loss: 0, hd: 0, k4: 0 };
+        cur.sw += n; cur.n += n; cur.thr += thr * n; cur.rtt += rtt * n; cur.loss += loss * n;
+        cur.hd += hd; cur.k4 += k4;
+      }
     }
     for (const isp of Object.keys(acc)) {
-      perIsp[isp] ??= {}; perIsp[isp][t.key] = { thr: {}, rtt: {}, loss: {} };
+      perIsp[isp] ??= {}; perIsp[isp][t.key] = { thr: {}, rtt: {}, loss: {}, hd: {}, k4: {} };
       for (const [bucket, c] of Object.entries(acc[isp][t.key])) {
         const w = c.sw || 1;
         perIsp[isp][t.key].thr[bucket] = { v: round(c.thr / w), n: c.n };
         perIsp[isp][t.key].rtt[bucket] = { v: round(c.rtt / w), n: c.n };
         perIsp[isp][t.key].loss[bucket] = { v: round((c.loss / w) * 100), n: c.n }; // LossRate(0~1) → %
+        perIsp[isp][t.key].hd[bucket] = { v: round((c.hd / c.n) * 100), n: c.n }; // HD(≥5Mbps) 도달률 %
+        perIsp[isp][t.key].k4[bucket] = { v: round((c.k4 / c.n) * 100), n: c.n }; // 4K(≥15Mbps) 도달률 %
       }
     }
   }

@@ -25,15 +25,17 @@ const DAY = 86400000;
 const GRID_MS = 10 * 60 * 1000;
 
 // M-Lab 캐시(collect-mlab.ts가 하루 1회 생성) 로드. 없으면 null → M-Lab 지표는 시뮬.
-// perIsp[ispId][tier][field='thr'|'rtt'|'loss'][bucketMs] = { v, n }
+// perIsp[ispId][tier][field='thr'|'rtt'|'loss'|'hd'|'k4'][bucketMs] = { v, n }
 type MlabCache = { perIsp: Record<string, Record<string, Record<string, Record<string, { v: number; n: number }>>>> };
 async function loadMlabCache(): Promise<MlabCache | null> {
   try { return JSON.parse(await readFile(MLAB_CACHE, 'utf8')) as MlabCache; }
   catch { return null; }
 }
 // M-Lab 지표 id → 캐시 필드
-const MLAB_FIELD: Record<string, 'thr' | 'rtt' | 'loss'> = {
+const MLAB_FIELD: Record<string, 'thr' | 'rtt' | 'loss' | 'hd' | 'k4'> = {
   meanThroughput: 'thr', minRtt: 'rtt', lossRate: 'loss',
+  // HD/4K 스트리밍 도달률 — M-Lab 다운로드 처리량의 ≥5/≥15Mbps 비율(%)에서 파생.
+  nfHd: 'hd', nf4k: 'k4',
 };
 
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
@@ -88,15 +90,11 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   latency: { good: 8, spread: 0.25, busy: 0.4 },
   jitter: { good: 1.5, spread: 0.5, busy: 0.8 },
   bandwidth: { good: 950, spread: 0.2, busy: -0.25 },
-  httpErrorRate: { good: 0.2, spread: 0.8, busy: 1.5 },
   loadedLatency: { good: 22, spread: 0.4, busy: 0.9 },   // 부하 중 지연: idle보다 높고 최번시에 크게 상승
   p25Throughput: { good: 600, spread: 0.2, busy: -0.28 }, // 하위 25% 처리량: 평균보다 낮고 최번시에 더 민감
   meanThroughput: { good: 920, spread: 0.18, busy: -0.22 },
-  uploadThroughput: { good: 320, spread: 0.25, busy: -0.2 }, // 단일스트림 업로드 실측 수준
   minRtt: { good: 6, spread: 0.2, busy: 0.15 },
   lossRate: { good: 0.1, spread: 1.0, busy: 2.0 },
-  cwnd: { good: 4200, spread: 0.3, busy: -0.2 },
-  pacingRate: { good: 900, spread: 0.2, busy: -0.2 },
   ipv6: { good: 40, spread: 0.1, busy: 0 }, // IPv6 채택률(%): 시간대 무관, 지역별 차이
   dnsResponse: { good: 18, spread: 0.3, busy: 0.4 }, // DNS 응답시간(ms): 낮을수록 좋음
   // Netflix 스트리밍 품질: HD/4K 가능 비율은 부하에 떨어지고(4K가 더 민감), Speed Index(Mbps)도 소폭 하락.
@@ -104,7 +102,7 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'uploadThroughput', 'cwnd', 'pacingRate', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)

@@ -51,8 +51,6 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 idle 지연(RTT) 실측', url: 'https://radar.cloudflare.com/quality' } },
   { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality' } },
-  { id: 'httpErrorRate', name: 'HTTP 오류율', source: 'cloudflare', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 },
-    cite: { grade: 'B', basis: 'Cloudflare Radar HTTP 데이터셋(AS 차원)의 상태코드 분포 기반 4xx/5xx 비율 집계', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/' } },
   // 보장 처리량(하위 25%): Cloudflare가 ASN별 다운로드 25퍼센타일을 직접 공개. "최악 체감 속도".
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality' } },
@@ -66,17 +64,10 @@ export const METRICS: MetricDef[] = [
   // --- M-Lab (ndt7) ---
   { id: 'meanThroughput', name: '평균 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'M-Lab ndt7: 다운로드 처리량 실측 (BigQuery 공개셋 measurement-lab.ndt.ndt7)', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
-  // 업로드 처리량: ndt7은 다운로드와 함께 업로드도 독립 측정. 대칭성·업로드 체감(백업/방송/게임).
-  { id: 'uploadThroughput', name: '업로드 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
-    cite: { grade: 'A', basis: 'M-Lab ndt7: 업로드 처리량 실측 (BigQuery 공개셋, download/upload 독립 테스트)', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
   { id: 'minRtt', name: '최소 RTT', source: 'mlab', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
     cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 최소 RTT(tcpi_min_rtt) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
   { id: 'lossRate', name: '손실률', source: 'mlab', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 },
     cite: { grade: 'B', basis: 'M-Lab ndt7 TCP_INFO: 재전송 카운터 기반 손실률 집계', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
-  { id: 'cwnd', name: '혼잡 윈도우', source: 'mlab', unit: 'KB', higherIsBetter: true, hard: { min: 0, max: 100000 },
-    cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 혼잡 윈도우(tcpi_snd_cwnd) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
-  { id: 'pacingRate', name: '페이싱 레이트', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
-    cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 페이싱 레이트(tcpi_pacing_rate) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
 
   // --- Netflix 스트리밍 품질 ---
   // hd_verified_percentage: HD(1080p) 재생 가능 비율(지속 처리량 ≥ 5Mbps). 등급(rating_grade) 산출 기준.
