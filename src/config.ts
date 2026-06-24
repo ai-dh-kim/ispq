@@ -48,7 +48,7 @@ export const TIER_VIEWS: Record<TierKey, ViewKey[]> = {
 
 // UI 문구 (한국어)
 export const T = {
-  appTitle: '유선 브로드밴드 품질 대시보드',
+  appTitle: 'ISP Service Quality Dashboard',
   modeSim: '시뮬레이션 데이터',
   modeLive: '실시간',
   metric: '지표',

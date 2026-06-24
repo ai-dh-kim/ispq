@@ -87,7 +87,6 @@ export default function App() {
     <div className="app" ref={appRef}>
       <header className="toolbar">
         <h1>📡 {T.appTitle}</h1>
-        {mode && <span className={`mode-badge ${mode}`}>{mode === 'sim' ? T.modeSim : T.liveMixed}</span>}
         <div className="spacer" />
 
         <label className="field">{T.source}
