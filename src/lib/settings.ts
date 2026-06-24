@@ -7,7 +7,7 @@ const KEY = 'fbqd-api-settings';
 // 기본 데이터 소스 = 내 GitHub raw quality_data.json (수집기가 주기적으로 갱신).
 // dev/prod 구분 없이 항상 이 URL을 기본으로 fetch. 모달에서 변경 가능(예: 로컬 테스트 시 /quality_data.json).
 const RAW_DATA_URL =
-  'https://raw.githubusercontent.com/ai-dh-kim/fixed-broadband-quality-dashboard/main/public/quality_data.json';
+  'https://raw.githubusercontent.com/ai-dh-kim/ispq/main/public/quality_data.json';
 
 export interface ApiSettings {
   // 대시보드가 실제로 페치하는 정적 JSON 위치(기본: 내 GitHub raw URL).

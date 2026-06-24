@@ -1,5 +1,5 @@
 {
-  "name": "fixed-broadband-quality-dashboard",
+  "name": "ispq",
   "version": "2.0.0",
   "description": "Global Open API-based Fixed Broadband Quality Dashboard (React + Vite + TS)",
   "type": "module",
