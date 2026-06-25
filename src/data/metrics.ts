@@ -58,13 +58,16 @@ export const METRICS: MetricDef[] = [
   { id: 'dnsResponse', name: 'DNS 응답시간', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 DNS 응답시간(중앙값) 실측', url: 'https://radar.cloudflare.com/quality' } },
   { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality' } },
+    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality',
+      note: '※ Cloudflare가 실측한 다운로드 속도의 중앙값(체감 속도)입니다. 가입 상품의 회선 용량(예: 1G)이 아니며, 측정 환경·서버 영향으로 표기 속도보다 낮게 나옵니다. ISP 간 상대·추세 비교용입니다.' } },
   // 보장 처리량(하위 25%): Cloudflare가 ASN별 다운로드 25퍼센타일을 직접 공개. "최악 체감 속도".
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality' } },
+    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 다운로드 속도 하위 25%(최악 체감 구간)의 측정 중앙값입니다. 가입 회선 용량이 아닌 체감 속도이며, ISP 간 상대 비교용입니다.' } },
   // IPv6 채택률: ISP 망 현대화 수준(높을수록 최신). Cloudflare가 ASN별 IPv6 트래픽 비율을 시계열로 공개.
   { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/' } },
+    cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/',
+      note: '※ Cloudflare HTTP 트래픽 중 IPv6 비율(실측)입니다. 한국 유선망은 IPv6 도입률이 낮아 일부 ISP(예: KT·SK브로드밴드)는 0%에 가깝게 나올 수 있으며, 이는 측정값이지 오류가 아닙니다.' } },
 
   // --- M-Lab (ndt7) ---
   { id: 'meanThroughput', name: '평균 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, mlabBased: true,
