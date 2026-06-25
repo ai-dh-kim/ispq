@@ -85,14 +85,14 @@ export const METRICS: MetricDef[] = [
       note: '※ 최상 조건의 지연 바닥으로, 코어망/백본 경로 품질에 가깝습니다. 단 M-Lab 서버까지의 거리(국가·서버 위치)에 의존합니다.' } },
   { id: 'lossRate', name: '손실률', source: 'mlab', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, mlabBased: true,
     cite: { grade: 'B', basis: 'M-Lab ndt7 TCP_INFO: 재전송 카운터 기반 손실률 집계', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
+  // 스트리밍 가능률: M-Lab 처리량이 권장 비트레이트 이상인 측정의 비율(%). Netflix가 측정한 값이 아니라
+  // M-Lab 처리량을 Netflix 공식 권장값으로 임계 처리한 '파생(grade C)' 지표 → 출처는 M-Lab.
+  { id: 'nfHd', name: 'HD 스트리밍 가능률 (≥5Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, grades: NF_GRADES, mlabBased: true,
+    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Full HD 1080p = 5Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306' } },
+  { id: 'nf4k', name: '4K 스트리밍 가능률 (≥15Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, mlabBased: true,
+    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306' } },
 
-  // --- Netflix 스트리밍 품질 ---
-  // hd_verified_percentage: HD(1080p) 재생 가능 비율(지속 처리량 ≥ 5Mbps). 등급(rating_grade) 산출 기준.
-  { id: 'nfHd', name: 'HD 재생 가능 비율 (1080p)', source: 'netflix', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, grades: NF_GRADES, mlabBased: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Full HD 1080p = 5Mbps 이상)', url: 'https://help.netflix.com/en/node/306' } },
-  // 4K(UHD) 재생 가능 비율(지속 처리량 ≥ 15Mbps). 부하에 더 민감.
-  { id: 'nf4k', name: '4K(UHD) 재생 가능 비율', source: 'netflix', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, mlabBased: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)', url: 'https://help.netflix.com/en/node/306' } },
+  // --- Netflix 스트리밍 품질 (Netflix가 직접 공개한 값) ---
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
   { id: 'nfSpeedIndex', name: 'ISP Speed Index (프라임타임 평균)', source: 'netflix', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },

@@ -59,6 +59,10 @@ export default function MetricSection(props: Props) {
       <h2>
         {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)` : T.chartTitle(metric.name, VIEWS[view].label)}
         <span className={`live-tag ${isLive ? 'live' : 'sim'}`}>{isLive ? T.liveTag : T.simTag}</span>
+        {/* 근거 등급: 직접측정(A)/집계(B)/파생(C)을 한눈에 — 직접측정과 파생을 구분(임원 신뢰성). */}
+        <span className={`grade-tag grade-${metric.cite.grade}`} title={T.gradeTip[metric.cite.grade]}>
+          {T.gradeTag[metric.cite.grade]}
+        </span>
         <span className="cite-info" tabIndex={0} aria-label={T.citeSource}>
           ⓘ
           <span className="cite-pop">
