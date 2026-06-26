@@ -92,7 +92,6 @@ export default function IspMultiSelect({ selected, onChange, colorIndex }: Props
                           <label className="ms-item ms-sub" key={u.id}>
                             <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggle(u.id)} />
                             <span>{u.asn}</span>
-                            {u.note && <small className="asn-role">{u.note}</small>}
                           </label>
                         ))}
                       </div>
