@@ -23,19 +23,7 @@ export default function MetricSection(props: Props) {
   const { metricId, view, data, selectedIsps, range } = props;
   const metric = METRIC_BY_ID[metricId];
 
-  // 이 지표가 실측 데이터인지. 생성기가 내려준 명시적 liveMetrics를 우선 사용
-  // (M-Lab처럼 실표본수가 있는 실데이터도 정확히 판정). 구버전 데이터는 표본수 null 휴리스틱으로 폴백.
   const tier = RANGES[range].tier;
-  const isLive = useMemo(() => {
-    if (data.liveMetrics) return data.liveMetrics.includes(metricId);
-    for (const isp of selectedIsps) {
-      const blk = data.series[isp]?.[metricId]?.[tier];
-      if (!blk) continue;
-      const [v, n] = blk;
-      for (let i = 0; i < v.length; i++) if (v[i] != null && n[i] == null) return true;
-    }
-    return false;
-  }, [data, selectedIsps, metricId, tier]);
 
   // M-Lab 기반 지표의 '마지막 실데이터' 날짜(공지에 표기). 선택 ISP 중 가장 최신 non-null 시점.
   const mlabLastDate = useMemo(() => {
@@ -58,11 +46,12 @@ export default function MetricSection(props: Props) {
     <section className="panel metric-section">
       <h2>
         {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)` : T.chartTitle(metric.name, VIEWS[view].label)}
-        <span className={`live-tag ${isLive ? 'live' : 'sim'}`}>{isLive ? T.liveTag : T.simTag}</span>
-        {/* 근거 등급: 직접측정(A)/집계(B)/파생(C)을 한눈에 — 직접측정과 파생을 구분(임원 신뢰성). */}
-        <span className={`grade-tag grade-${metric.cite.grade}`} title={T.gradeTip[metric.cite.grade]}>
-          {T.gradeTag[metric.cite.grade]}
-        </span>
+        {/* 근거 등급: 직접측정(A)은 기본이라 생략, 집계(B)·파생(C)만 표시해 주의 환기. */}
+        {metric.cite.grade !== 'A' && (
+          <span className={`grade-tag grade-${metric.cite.grade}`} title={T.gradeTip[metric.cite.grade]}>
+            {T.gradeTag[metric.cite.grade]}
+          </span>
+        )}
         <span className="cite-info" tabIndex={0} aria-label={T.citeSource}>
           ⓘ
           <span className="cite-pop">

@@ -7,7 +7,8 @@ export interface Isp {
   asns: string[];
   hidden?: boolean; // 선택 목록엔 안 보이지만 데이터는 생성(합산/통합 entry용)
   // 멀티 ASN ISP: 박스 하나 안에서 ASN을 개별 선택. 각 unit은 별도 데이터 entry로 생성된다.
-  asnUnits?: { id: string; asn: string }[];
+  // note: ASN의 망 역할(예: 가입자/백본) — 선택 박스에 작게 표기해 해석 오해 방지.
+  asnUnits?: { id: string; asn: string; note?: string }[];
 }
 
 export interface IspGroup {
@@ -24,8 +25,13 @@ export const ISP_GROUPS: IspGroup[] = [
     pinned: true,
     isps: [
       // LG U+: 박스 하나 안에서 ASN 2개를 개별 선택. 둘 다 선택 시 합산(통합 id: lgu)으로 표시.
+      // AS3786=상위(백본/IX단), AS17858=하위 BGP(가입자/eyeball). 가정용 실측은 17858이 대표적이며
+      // 3786은 측정 경로상 ~94Mbps 부근에 고정되는 경향(통합값 해석 시 참고).
       { id: 'lgu', name: 'LG U+', asns: ['AS3786', 'AS17858'],
-        asnUnits: [{ id: 'lgu-3786', asn: 'AS3786' }, { id: 'lgu-17858', asn: 'AS17858' }] },
+        asnUnits: [
+          { id: 'lgu-3786', asn: 'AS3786', note: '백본/IX' },
+          { id: 'lgu-17858', asn: 'AS17858', note: '가입자' },
+        ] },
       { id: 'kt', name: 'KT', asns: ['AS4766'] },
       { id: 'skb', name: 'SK 브로드밴드', asns: ['AS9318'] },
     ],
