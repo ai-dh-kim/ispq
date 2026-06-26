@@ -110,4 +110,5 @@ export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
   METRICS.map((m) => [m.id, m])
 );
 
-export const DEFAULT_METRIC = 'meanThroughput';
+// 첫 진입 기본 = Cloudflare Radar 출처(이 지표가 속한 출처가 초기 선택됨).
+export const DEFAULT_METRIC = 'latency';
