@@ -11,6 +11,7 @@ import { loadSettings, saveSettings, type ApiSettings as ApiSettingsType } from 
 import { captureElement, timestampName } from './lib/screenshot.ts';
 import IspMultiSelect from './components/IspMultiSelect.tsx';
 import MetricSection from './components/MetricSection.tsx';
+import SummaryPanel from './components/SummaryPanel.tsx';
 import ApiSettings from './components/ApiSettings.tsx';
 
 // 선언 순서 기반 ISP 색상 인덱스.
@@ -35,6 +36,7 @@ export default function App() {
   const [settings, setSettings] = useState<ApiSettingsType>(loadSettings);
   const [showApi, setShowApi] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { applyTheme(theme); }, [theme]);
@@ -60,6 +62,21 @@ export default function App() {
       setCapturing(false);
     }
   };
+
+  // 요약 패널 셀 클릭 → 그 지표의 출처로 전환 + 해당 차트 섹션으로 스크롤.
+  // 출처 전환으로 섹션이 새로 마운트된 뒤에 스크롤해야 하므로 effect에서 처리.
+  const handleJump = useCallback((metricId: string) => {
+    setSourceId(METRIC_BY_ID[metricId].source);
+    setJumpTarget(metricId);
+  }, []);
+  useEffect(() => {
+    if (!jumpTarget) return;
+    // 차트 마운트로 레이아웃이 밀리며 smooth 스크롤이 취소될 수 있어, 즉시 이동 후 한 번 더 보정.
+    const go = () => document.getElementById(`metric-${jumpTarget}`)?.scrollIntoView({ block: 'start' });
+    go();
+    const t = setTimeout(() => { go(); setJumpTarget(null); }, 250);
+    return () => clearTimeout(t);
+  }, [jumpTarget, sourceId]);
 
   const tier = RANGES[range].tier;
   const allowedViews = TIER_VIEWS[tier];
@@ -163,7 +180,9 @@ export default function App() {
           ) : loading || !data ? (
             <section className="panel"><div className="empty">{T.loading}</div></section>
           ) : (
-            sourceMetrics.map((m) => (
+            <>
+            <SummaryPanel data={data} onJump={handleJump} />
+            {sourceMetrics.map((m) => (
               <MetricSection
                 key={`${m.id}-${chartResetKey}`}
                 metricId={m.id}
@@ -175,7 +194,8 @@ export default function App() {
                 theme={theme}
                 colorIndex={colorIndex}
               />
-            ))
+            ))}
+            </>
           )}
         </main>
       </div>

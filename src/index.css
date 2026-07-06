@@ -204,6 +204,52 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 .grade-tag.grade-B { color: var(--text-dim); }
 .grade-tag.grade-C { color: var(--warn); border-color: var(--warn); }
 
+/* ---- 한눈에 보기(임원 요약) 패널 ---- */
+.summary-panel h2 { display: flex; align-items: center; flex-wrap: wrap; }
+.sum-toggle {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text-dim); cursor: pointer;
+  text-transform: none; letter-spacing: normal; font-weight: 400;
+}
+.sum-nochange { font-size: 12px; color: var(--text-dim); margin: 0 0 12px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.sum-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.sum-card {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-2); cursor: pointer; font-size: 12px;
+}
+.sum-card.worse { border-left: 3px solid var(--bad); }
+.sum-card.better { border-left: 3px solid var(--good); }
+.sum-card:hover { border-color: var(--accent); }
+.sum-card-head { font-weight: 600; color: var(--text); }
+.sum-card.worse .sum-card-head { color: var(--bad); }
+.sum-card.better .sum-card-head { color: var(--good); }
+.sum-card-body { color: var(--text-dim); font-size: 11px; }
+.sum-table-wrap { overflow-x: auto; }
+.sum-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sum-table th {
+  text-align: right; padding: 6px 8px; font-weight: 600; color: var(--text-dim);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.sum-table th small { font-weight: 400; font-size: 10px; }
+.sum-table th.sum-isp, .sum-table td.sum-isp { text-align: left; white-space: nowrap; }
+.sum-table td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.sum-table tr:last-child td { border-bottom: none; }
+.sum-table td.sum-isp { font-weight: 600; color: var(--text); }
+.sum-table td.sum-na { color: var(--text-dim); }
+.sum-cell {
+  background: none; border: none; padding: 2px 4px; border-radius: 4px;
+  font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap;
+}
+.sum-cell:hover { background: var(--surface-2); border: none; }
+.rank-pill {
+  display: inline-block; min-width: 16px; text-align: center;
+  font-size: 10px; font-weight: 700; border-radius: 8px; padding: 1px 4px; margin-right: 5px;
+  color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--border);
+}
+.rank-pill.top { color: #fff; background: var(--good); border-color: var(--good); }
+.rank-pill.last { color: #fff; background: var(--bad); border-color: var(--bad); }
+
 /* 지표 출처 — 제목 옆 ⓘ 아이콘에 마우스 오버 시 팝오버로 표시 */
 .cite-info { position: relative; display: inline-flex; margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--text-dim); cursor: help; vertical-align: middle; }
 .cite-pop {

@@ -103,6 +103,17 @@ export const T = {
   // 일별 수집(dailyCadence) 지표 공지 — Cloudflare Speed Test 등 하루 1회 스냅샷 데이터
   dailyDelayNotice: (last: string | null) =>
     `ℹ 이 지표는 하루 1회(전일분까지) 수집되는 일별 집계입니다. 항상 1일 버킷으로 표시되며, X축은 새 데이터가 들어올 때만 진행됩니다${last ? ` (현재 마지막: ${last})` : ''}.`,
+  // 요약 패널 (한눈에 보기)
+  summaryTitle: '한눈에 보기',
+  summarySubtitleKr: '한국 3사 · 최근 7일',
+  summarySubtitleAll: '표시 ISP 전체 · 최근 7일',
+  summaryToggleForeign: '해외 포함',
+  summaryNoChange: '최근 7일, 이전 30일 대비 뚜렷한 변화 없음 (±10% 미만)',
+  summaryWorse: '악화',
+  summaryBetter: '개선',
+  summaryMethod:
+    '각 지표의 마지막 실데이터 시점 기준 최근 7일 평균을 표시된 ISP 간 상대 순위로 비교합니다(절대 등급 아님). 변화 카드는 최근 7일 vs 이전 30일 평균의 변화율이며, ±10% 이상만 표시합니다. 실측값의 산술 비교로 만든 파생 지표입니다.',
+  summaryJumpTip: '클릭하면 해당 지표 차트로 이동',
   // 데이터 소스 설정 모달
   apiButton: '데이터 소스',
   apiTitle: '데이터 소스 설정',

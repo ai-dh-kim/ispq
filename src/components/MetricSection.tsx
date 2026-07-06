@@ -44,7 +44,7 @@ export default function MetricSection(props: Props) {
   }, [data, selectedIsps, metricId, tier, metric.mlabBased, metric.dailyCadence]);
 
   return (
-    <section className="panel metric-section">
+    <section className="panel metric-section" id={`metric-${metricId}`}>
       <h2>
         {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)`
           : metric.dailyCadence ? T.chartTitle(metric.name, VIEWS['1day'].label)
