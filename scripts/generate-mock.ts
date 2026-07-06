@@ -40,6 +40,20 @@ const MLAB_FIELD: Record<string, 'thr' | 'rtt' | 'loss' | 'hd' | 'k4' | 'rttFloo
   latencyFloor: 'rttFloor', peakCapacity: 'thrPeak',
 };
 
+// Cloudflare Speed Test 캐시(collect-speedtest.ts가 하루 1회 생성): 일별 스냅샷.
+// perIsp[ispId][dayMs] = { bd,bu(Mbps), li,ll,ji,jl(ms), pl } — 버킷 시각 t는 그 날(UTC)의 값을 사용.
+const SPEED_CACHE = resolve(__dir, '../public/speedtest_cache.json');
+type SpeedSnap = { bd?: number; bu?: number; li?: number; ll?: number; ji?: number; jl?: number; pl?: number };
+type SpeedCache = { perIsp: Record<string, Record<string, SpeedSnap>> };
+async function loadSpeedCache(): Promise<SpeedCache | null> {
+  try { return JSON.parse(await readFile(SPEED_CACHE, 'utf8')) as SpeedCache; }
+  catch { return null; }
+}
+// Speed Test 지표 id → 캐시 필드 (지터·손실도 캐시엔 이미 수집됨 — 지표 추가 시 여기만 확장).
+const SPEED_FIELD: Record<string, keyof SpeedSnap> = {
+  uploadBandwidth: 'bu', loadedLatency: 'll',
+};
+
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
 const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
 type NetflixCache = { perIsp: Record<string, { ym: string; speed: number }[]> };
@@ -92,6 +106,7 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   latency: { good: 8, spread: 0.25, busy: 0.4 },
   jitter: { good: 1.5, spread: 0.5, busy: 0.8 },
   bandwidth: { good: 950, spread: 0.2, busy: -0.25 },
+  uploadBandwidth: { good: 480, spread: 0.25, busy: -0.3 }, // 업로드: 다운로드보다 낮고 최번시에 민감
   loadedLatency: { good: 22, spread: 0.4, busy: 0.9 },   // 부하 중 지연: idle보다 높고 최번시에 크게 상승
   p25Throughput: { good: 600, spread: 0.2, busy: -0.28 }, // 하위 25% 처리량: 평균보다 낮고 최번시에 더 민감
   meanThroughput: { good: 920, spread: 0.18, busy: -0.22 },
@@ -106,7 +121,7 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)
@@ -344,6 +359,8 @@ async function main() {
   if (mlab) console.log(`[mlab] 캐시 로드됨 (ISP ${Object.keys(mlab.perIsp ?? {}).length}개)`);
   const netflix = await loadNetflixCache(); // Netflix ISP Speed Index 월별 캐시
   if (netflix) console.log(`[netflix] 캐시 로드됨 (ISP ${netflix.size}개)`);
+  const speed = await loadSpeedCache(); // Cloudflare Speed Test 일별 캐시
+  if (speed) console.log(`[speed] 캐시 로드됨 (ISP ${Object.keys(speed.perIsp ?? {}).length}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -365,6 +382,7 @@ async function main() {
       const liveConnected =
         (CF_METRIC_FIELD[metric.id] != null && !!CF_TOKEN) ||
         (MLAB_FIELD[metric.id] != null && !!mlab) ||
+        (SPEED_FIELD[metric.id] != null && !!speed) ||
         (metric.id === 'nfSpeedIndex' && !!netflix);
       const entry = {} as Record<TierKey, TierBlock>;
       for (const g of TIER_GEN) {
@@ -373,15 +391,21 @@ async function main() {
         const n: (number | null)[] = [];
         const k: (number | null)[] = [];
         for (const t of axis) {
-          // 실데이터 우선순위: ① Cloudflare IQI(표본수 미상 n/k=null) ② M-Lab 캐시(실표본수 n) ③ 시뮬.
+          // 실데이터 우선순위: ① Cloudflare IQI(표본수 미상 n/k=null) ② Speed Test 일별 캐시 ③ M-Lab 캐시(실표본수 n) ④ 시뮬.
           const cfField = CF_METRIC_FIELD[metric.id];
           const cfReal = cfField ? cf[isp.id]?.[g.key]?.[cfField]?.get(t) : undefined;
+          const spField = SPEED_FIELD[metric.id];
+          // 일별 스냅샷: 버킷 t가 속한 날(UTC)의 값 (fine/mid 버킷엔 그 날 값이 반복 — dailyCadence 지표는 UI가 coarse 고정).
+          const spReal = spField ? speed?.perIsp?.[isp.id]?.[String(Math.floor(t / DAY) * DAY)]?.[spField] : undefined;
           const mlField = MLAB_FIELD[metric.id];
           const mlReal = mlField ? mlab?.perIsp?.[isp.id]?.[g.key]?.[mlField]?.[String(t)] : undefined;
           const nfReal = metric.id === 'nfSpeedIndex' ? nfSpeedAt(netflix?.get(isp.id), t) : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
+          } else if (spReal != null && Number.isFinite(spReal)) {
+            const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기
           } else if (mlReal && Number.isFinite(mlReal.v)) {
             const clamped = Math.min(Math.max(mlReal.v, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(mlReal.n); k.push(mlReal.n); live++; liveMetricSet.add(metric.id);

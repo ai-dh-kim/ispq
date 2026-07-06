@@ -101,8 +101,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
 
   // 월별 인덱스(nfSpeedIndex)는 상단 기간과 무관하게 항상 고정 180일(coarse·1일 버킷)로 표시.
   const FIXED180 = metricId === 'nfSpeedIndex';
-  const tier = FIXED180 ? 'coarse' : RANGES[range].tier;
-  const viewDef = FIXED180 ? VIEWS['1day'] : VIEWS[view];
+  // 일별 수집(dailyCadence) 지표: 데이터가 하루 1스냅샷 → 버킷 선택과 무관하게 항상 coarse(1일 버킷).
+  const DAILY = !!metric.dailyCadence;
+  const tier = FIXED180 || DAILY ? 'coarse' : RANGES[range].tier;
+  const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
 
   // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [effSince, maxMs]로 잡는다.
   // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.
@@ -143,11 +145,13 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
 
   const chrome = CHROME[theme];
 
-  // M-Lab 지표: 공개 데이터가 ~1~2일 지연되므로 X축을 '최신 실데이터' 지점에서 멈춘다(현재까지 끌고 가지 않음).
+  // 지연 발행 지표(M-Lab ~1~2일 / dailyCadence 하루 1회): X축을 '최신 실데이터' 지점에서 멈춘다(현재까지 끌고 가지 않음).
   // 창 너비(선택 기간)는 유지하고 오른쪽 끝만 lastLiveMs로 당겨, 끝의 빈 구간이 안 보이게 한다.
-  const mlabCap = !!metric.mlabBased && lastLiveMs != null && lastLiveMs < maxMs;
-  const xMax = mlabCap ? (lastLiveMs as number) : maxMs;
-  const xMin = mlabCap ? (lastLiveMs as number) - RANGES[range].ms : effSince;
+  // dailyCadence는 1일 버킷이므로 24시간 같은 짧은 기간에선 점 1~2개뿐 → 창을 최소 7일로 늘린다.
+  const winMs = DAILY ? Math.max(RANGES[range].ms, 7 * 86400000) : RANGES[range].ms;
+  const lagCap = (!!metric.mlabBased || DAILY) && lastLiveMs != null && lastLiveMs < maxMs;
+  const xMax = lagCap ? (lastLiveMs as number) : maxMs;
+  const xMin = lagCap ? (lastLiveMs as number) - winMs : DAILY ? maxMs - winMs : effSince;
 
   // Y축 산정용 데이터 min/max는 '현재 화면에 보이는 X구간 [xMin,xMax]' 안에서만 구한다.
   // (티어 전체에서 구하면 화면 밖 스파이크가 축을 끌어올려 그래프가 작아 보임.)

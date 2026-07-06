@@ -23,11 +23,12 @@ export default function MetricSection(props: Props) {
   const { metricId, view, data, selectedIsps, range } = props;
   const metric = METRIC_BY_ID[metricId];
 
-  const tier = RANGES[range].tier;
+  // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
+  const tier = metric.dailyCadence ? 'coarse' : RANGES[range].tier;
 
-  // M-Lab 기반 지표의 '마지막 실데이터' 날짜(공지에 표기). 선택 ISP 중 가장 최신 non-null 시점.
-  const mlabLastDate = useMemo(() => {
-    if (!metric.mlabBased) return null;
+  // 지연 발행(M-Lab)·일별 수집(dailyCadence) 지표의 '마지막 실데이터' 날짜(공지에 표기). 선택 ISP 중 가장 최신 non-null 시점.
+  const lastLiveDate = useMemo(() => {
+    if (!metric.mlabBased && !metric.dailyCadence) return null;
     const axis = data.tiers[tier]?.t;
     if (!axis) return null;
     let last = -1;
@@ -40,12 +41,14 @@ export default function MetricSection(props: Props) {
     return last >= 0
       ? new Date(axis[last]).toLocaleDateString('ko-KR', { timeZone: 'UTC', month: '2-digit', day: '2-digit' })
       : null;
-  }, [data, selectedIsps, metricId, tier, metric.mlabBased]);
+  }, [data, selectedIsps, metricId, tier, metric.mlabBased, metric.dailyCadence]);
 
   return (
     <section className="panel metric-section">
       <h2>
-        {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)` : T.chartTitle(metric.name, VIEWS[view].label)}
+        {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)`
+          : metric.dailyCadence ? T.chartTitle(metric.name, VIEWS['1day'].label)
+          : T.chartTitle(metric.name, VIEWS[view].label)}
         {/* 근거 등급: 직접측정(A)은 기본이라 생략, 집계(B)·파생(C)만 표시해 주의 환기. */}
         {metric.cite.grade !== 'A' && (
           <span className={`grade-tag grade-${metric.cite.grade}`} title={T.gradeTip[metric.cite.grade]}>
@@ -61,7 +64,8 @@ export default function MetricSection(props: Props) {
           </span>
         </span>
       </h2>
-      {metric.mlabBased && <p className="mlab-delay">{T.mlabDelayNotice(mlabLastDate)}</p>}
+      {metric.mlabBased && <p className="mlab-delay">{T.mlabDelayNotice(lastLiveDate)}</p>}
+      {metric.dailyCadence && <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate)}</p>}
       <MetricChart {...props} />
     </section>
   );

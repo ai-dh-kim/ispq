@@ -32,6 +32,9 @@ export interface MetricDef {
   //  (1) 차트에 지연 공지 표시  (2) X축을 '최신 M-Lab 데이터' 지점에서 멈춤(현재까지 끌고 가지 않음).
   // nfHd/nf4k는 출처가 netflix지만 실제 값은 M-Lab 처리량에서 파생되므로 동일하게 적용.
   mlabBased?: boolean;
+  // 실데이터가 '하루 1회 스냅샷'(일별 집계)으로만 수집되는 지표(예: Cloudflare Speed Test 캐시).
+  //  (1) 차트를 항상 coarse(1일 버킷)로 표시  (2) X축을 마지막 실데이터에서 멈춤  (3) 일별 수집 공지 표시.
+  dailyCadence?: boolean;
   pctFull?: boolean; // 0~100% 완료율(가능률 등) — Y축을 0~100 고정(100% 초과 불가).
   cite: MetricCite; // 근거(등급/출처) — 모든 지표 필수(형평성). 차트 하단에 표시.
 }
@@ -65,6 +68,15 @@ export const METRICS: MetricDef[] = [
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality',
       note: '※ 다운로드 속도 하위 25%(최악 체감 구간)의 측정 중앙값입니다. 가입 회선 용량이 아닌 체감 속도이며, ISP 간 상대 비교용입니다.' } },
+  // 업로드 속도: Cloudflare Speed Test(speed.cloudflare.com) 사용자 실측의 ASN별 일별 집계.
+  // M-Lab 업로드는 BigQuery 스캔 비용 ~2배라 보류(§8) → Speed Test로 무비용 확보.
+  { id: 'uploadBandwidth', name: '업로드 속도', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 업로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 사용자가 자발적으로 실행한 스피드테스트 집계라 측정자 자기선택·WiFi/단말 영향이 있습니다. 가입 상품 속도가 아닌 체감 업로드 속도이며, ISP 간 상대·추세 비교용입니다.' } },
+  // 부하 시 지연(버퍼블로트): 다운/업로드 진행 중 측정한 지연. 유휴 RTT와의 차이가 클수록 동시사용 체감 악화.
+  { id: 'loadedLatency', name: '부하 시 지연 (버퍼블로트)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test: 전송(다운/업로드) 진행 중 측정한 지연(loaded latency)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 회선이 가득 찼을 때의 지연입니다. 유휴 지연(RTT)보다 얼마나 커지는지가 핵심(버퍼블로트) — 값이 클수록 대용량 전송 중 화상회의·게임이 끊기는 체감이 나빠집니다.' } },
   // IPv6 채택률: ISP 망 현대화 수준(높을수록 최신). Cloudflare가 ASN별 IPv6 트래픽 비율을 시계열로 공개.
   { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
     cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/',
