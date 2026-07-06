@@ -182,6 +182,8 @@ export default function App() {
           ) : (
             <>
             <SummaryPanel data={data} onJump={handleJump} />
+            {/* 쌍둥이 패널: 사용자가 취합 기간(일)을 직접 지정 (표시 방식은 위와 동일) */}
+            <SummaryPanel data={data} onJump={handleJump} adjustable defaultDays={30} />
             {sourceMetrics.map((m) => (
               <MetricSection
                 key={`${m.id}-${chartResetKey}`}
