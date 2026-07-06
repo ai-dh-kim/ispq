@@ -49,9 +49,10 @@ async function loadSpeedCache(): Promise<SpeedCache | null> {
   try { return JSON.parse(await readFile(SPEED_CACHE, 'utf8')) as SpeedCache; }
   catch { return null; }
 }
-// Speed Test 지표 id → 캐시 필드 (지터·손실도 캐시엔 이미 수집됨 — 지표 추가 시 여기만 확장).
+// Speed Test 지표 id → 캐시 필드 (부하 중 지터 jl만 미사용 — 지표 추가 시 여기만 확장).
+// pl은 API 원값이 이미 %단위(실데이터 분포로 검증) → 변환 없음.
 const SPEED_FIELD: Record<string, keyof SpeedSnap> = {
-  uploadBandwidth: 'bu', loadedLatency: 'll',
+  downloadBandwidth: 'bd', uploadBandwidth: 'bu', loadedLatency: 'll', jitter: 'ji', packetLoss: 'pl',
 };
 
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
@@ -106,7 +107,9 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   latency: { good: 8, spread: 0.25, busy: 0.4 },
   jitter: { good: 1.5, spread: 0.5, busy: 0.8 },
   bandwidth: { good: 950, spread: 0.2, busy: -0.25 },
+  downloadBandwidth: { good: 900, spread: 0.2, busy: -0.25 }, // Speed Test 다운로드(IQI 대역폭과 별도)
   uploadBandwidth: { good: 480, spread: 0.25, busy: -0.3 }, // 업로드: 다운로드보다 낮고 최번시에 민감
+  packetLoss: { good: 0.1, spread: 1.0, busy: 2.0 }, // Speed Test 패킷 손실(%): lossRate와 유사 특성
   loadedLatency: { good: 22, spread: 0.4, busy: 0.9 },   // 부하 중 지연: idle보다 높고 최번시에 크게 상승
   p25Throughput: { good: 600, spread: 0.2, busy: -0.28 }, // 하위 25% 처리량: 평균보다 낮고 최번시에 더 민감
   meanThroughput: { good: 920, spread: 0.18, busy: -0.22 },
@@ -121,7 +124,7 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)

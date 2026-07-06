@@ -41,6 +41,8 @@ export interface MetricDef {
 
 export const SOURCES: Record<string, SourceDef> = {
   cloudflare: { id: 'cloudflare', label: 'Cloudflare Radar' },
+  // Speed Test는 같은 Cloudflare지만 측정 방식이 다름(실트래픽 수동측정 vs 사용자 자발 실행 능동측정) → 별도 출처 탭.
+  cfspeed: { id: 'cfspeed', label: 'Cloudflare Speed Test' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
   netflix: { id: 'netflix', label: 'Netflix 스트리밍 품질 (ISP Speed Index)' },
 };
@@ -68,19 +70,33 @@ export const METRICS: MetricDef[] = [
   { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality',
       note: '※ 다운로드 속도 하위 25%(최악 체감 구간)의 측정 중앙값입니다. 가입 회선 용량이 아닌 체감 속도이며, ISP 간 상대 비교용입니다.' } },
-  // 업로드 속도: Cloudflare Speed Test(speed.cloudflare.com) 사용자 실측의 ASN별 일별 집계.
-  // M-Lab 업로드는 BigQuery 스캔 비용 ~2배라 보류(§8) → Speed Test로 무비용 확보.
-  { id: 'uploadBandwidth', name: '업로드 속도', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
-    cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 업로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
-      note: '※ 사용자가 자발적으로 실행한 스피드테스트 집계라 측정자 자기선택·WiFi/단말 영향이 있습니다. 가입 상품 속도가 아닌 체감 업로드 속도이며, ISP 간 상대·추세 비교용입니다.' } },
-  // 부하 시 지연(버퍼블로트): 다운/업로드 진행 중 측정한 지연. 유휴 RTT와의 차이가 클수록 동시사용 체감 악화.
-  { id: 'loadedLatency', name: '부하 시 지연 (버퍼블로트)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
-    cite: { grade: 'A', basis: 'Cloudflare Speed Test: 전송(다운/업로드) 진행 중 측정한 지연(loaded latency)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
-      note: '※ 회선이 가득 찼을 때의 지연입니다. 유휴 지연(RTT)보다 얼마나 커지는지가 핵심(버퍼블로트) — 값이 클수록 대용량 전송 중 화상회의·게임이 끊기는 체감이 나빠집니다.' } },
   // IPv6 채택률: ISP 망 현대화 수준(높을수록 최신). Cloudflare가 ASN별 IPv6 트래픽 비율을 시계열로 공개.
   { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
     cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/',
       note: '※ Cloudflare HTTP 트래픽 중 IPv6 비율(실측)입니다. 한국 유선망은 IPv6 도입률이 낮아 일부 ISP(예: KT·SK브로드밴드)는 0%에 가깝게 나올 수 있으며, 이는 측정값이지 오류가 아닙니다.' } },
+
+  // --- Cloudflare Speed Test (speed.cloudflare.com) ---
+  // 사용자가 자발적으로 실행한 스피드테스트의 ASN별 일별 집계(collect-speedtest.ts 캐시).
+  // 전 지표 dailyCadence(하루 1스냅샷·coarse 고정). 공통 한계: 측정자 자기선택·WiFi/단말 영향.
+  { id: 'downloadBandwidth', name: '다운로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 다운로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ Cloudflare Radar 탭의 대역폭(실트래픽 기반 IQI)과 측정 방식이 다른 독립 실측이라 값이 다를 수 있으며, 상호 교차검증용입니다. 가입 상품 속도가 아닌 체감 속도입니다.' } },
+  // 업로드: M-Lab 업로드는 BigQuery 스캔 비용 ~2배라 보류(§8) → Speed Test로 무비용 확보.
+  { id: 'uploadBandwidth', name: '업로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 업로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 사용자가 자발적으로 실행한 스피드테스트 집계라 측정자 자기선택·WiFi/단말 영향이 있습니다. 가입 상품 속도가 아닌 체감 업로드 속도이며, ISP 간 상대·추세 비교용입니다.' } },
+  // 부하 시 지연(버퍼블로트): 다운/업로드 진행 중 측정한 지연. 유휴 RTT와의 차이가 클수록 동시사용 체감 악화.
+  { id: 'loadedLatency', name: '부하 시 지연 (버퍼블로트)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test: 전송(다운/업로드) 진행 중 측정한 지연(loaded latency)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 회선이 가득 찼을 때의 지연입니다. 유휴 지연(RTT)보다 얼마나 커지는지가 핵심(버퍼블로트) — 값이 클수록 대용량 전송 중 화상회의·게임이 끊기는 체감이 나빠집니다.' } },
+  // 지터: 지연시간의 변동폭. 유휴 상태 측정(일반 스피드테스트 표기와 동일 기준). 부하 중 지터(jl)도 캐시에 수집 중.
+  { id: 'jitter', name: '지터 (유휴)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test: 유휴 상태 지연 변동(지터)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 지연시간이 얼마나 출렁이는지(변동폭)입니다. 낮을수록 화상회의·게임·실시간 스트리밍이 안정적입니다.' } },
+  // 패킷 손실률: API 원값이 이미 %단위(실데이터 분포로 검증: 0~0.2% 수준). M-Lab lossRate와 독립 측정이라 교차검증 가능.
+  { id: 'packetLoss', name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Speed Test: 패킷 손실률의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
+      note: '※ M-Lab 손실률(TCP 재전송 기반)과 측정 방식이 다른 독립 실측입니다. 두 값을 함께 보면 교차검증이 됩니다. 0%가 정상이며 0.5%만 넘어도 체감 품질이 떨어집니다.' } },
 
   // --- M-Lab (ndt7) ---
   { id: 'meanThroughput', name: '평균 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, mlabBased: true,
