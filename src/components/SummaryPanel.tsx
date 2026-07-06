@@ -50,7 +50,6 @@ export default function SummaryPanel({ data, onJump, adjustable = false, default
     <section className="panel summary-panel">
       <h2>
         {T.summaryTitle} — {foreign ? T.summaryScopeAll : T.summaryScopeKr} · {T.summaryWindow(days)}
-        <span className="grade-tag grade-C" title={T.gradeTip.C}>{T.gradeTag.C}</span>
         <span className="cite-info" tabIndex={0} aria-label={T.citeSource}>
           ⓘ<span className="cite-pop">{T.summaryMethod}</span>
         </span>

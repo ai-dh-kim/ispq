@@ -1,7 +1,9 @@
 // 범위/버킷/티어 매핑 + UI 문구 (한국어). 단일 출처.
 import type { TierKey } from './types.ts';
 
-export type RangeKey = '24h' | '2d' | '7d' | '30d' | '90d' | '180d' | '1y';
+// 실데이터 보유 범위(Cloudflare IQI·Speed Test ~90일)에 맞춰 최대 90일까지만 제공.
+// (180일·1년은 빈 구간만 보여 제거 — 2026-07-06. 데이터가 쌓이면 다시 추가 가능.)
+export type RangeKey = '24h' | '2d' | '7d' | '30d' | '90d';
 export type ViewKey = '10min' | '1hour' | '1day';
 
 const DAY = 86400000;
@@ -12,15 +14,13 @@ export interface RangeDef {
   tier: TierKey; // 이 범위에서 사용할 데이터 티어
 }
 
-// 최대 1년까지. 범위가 커질수록 더 거친 티어를 사용해 단일 파일 크기 유지.
+// 범위가 커질수록 더 거친 티어를 사용해 단일 파일 크기 유지.
 export const RANGES: Record<RangeKey, RangeDef> = {
   '24h': { label: '최근 24시간', ms: DAY, tier: 'fine' },
   '2d': { label: '최근 2일', ms: 2 * DAY, tier: 'fine' },
   '7d': { label: '최근 7일', ms: 7 * DAY, tier: 'mid' },
   '30d': { label: '최근 30일', ms: 30 * DAY, tier: 'mid' },
   '90d': { label: '최근 90일', ms: 90 * DAY, tier: 'coarse' },
-  '180d': { label: '최근 180일', ms: 180 * DAY, tier: 'coarse' },
-  '1y': { label: '최근 1년', ms: 365 * DAY, tier: 'coarse' },
 };
 
 export interface ViewDef {
