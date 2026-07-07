@@ -78,8 +78,15 @@ export default function App() {
     return () => clearTimeout(t);
   }, [jumpTarget, sourceId]);
 
+  const sourceMetrics = useMemo(() => METRICS.filter((m) => m.source === sourceId), [sourceId]);
+  // 출처의 모든 지표가 일별 집계(dailyCadence)면 집계단위를 1일로 고정 — 기간을 어떻게 바꿔도 1일만 표시.
+  const dailySource = sourceMetrics.length > 0 && sourceMetrics.every((m) => m.dailyCadence);
+
   const tier = RANGES[range].tier;
-  const allowedViews = TIER_VIEWS[tier];
+  const allowedViews = useMemo<ViewKey[]>(
+    () => (dailySource ? ['1day'] : TIER_VIEWS[tier]),
+    [dailySource, tier],
+  );
 
   // 범위 변경 시 허용되지 않는 버킷이면 티어 기본으로 보정.
   useEffect(() => {
@@ -96,7 +103,6 @@ export default function App() {
   }, [data, tier, range]);
 
   const selectedList = useMemo(() => [...selected], [selected]);
-  const sourceMetrics = useMemo(() => METRICS.filter((m) => m.source === sourceId), [sourceId]);
   const mode = data?.mode;
   const effectiveView: ViewKey = allowedViews.includes(view) ? view : allowedViews[0];
 
@@ -110,8 +116,8 @@ export default function App() {
           <select value={sourceId} onChange={(e) => {
             const s = e.target.value;
             setSourceId(s);
-            // Speed Test는 하루 1회 집계 → 기간 30일·집계 1일로 자동 맞춤(7일/1시간은 무의미).
-            if (s === 'cfspeed') { setRange('30d'); setView('1day'); }
+            // Speed Test는 하루 1회 집계 → 기간 90일·집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
+            if (s === 'cfspeed') { setRange('90d'); setView('1day'); }
           }}>
             {Object.values(SOURCES).map((src) => (
               <option key={src.id} value={src.id}>{src.label}</option>
