@@ -20,7 +20,7 @@ const DAY = 86400000;
 const API = 'https://api.cloudflare.com/client/v4/radar/quality/speed/summary';
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const BACKFILL_DAYS = Math.min(Math.max(Number(process.env.BACKFILL_DAYS) || 5, 2), 364);
-const KEEP_DAYS = 400; // 이보다 오래된 스냅샷은 정리(coarse 365일 + 여유)
+const KEEP_DAYS = 800; // 이보다 오래된 스냅샷은 정리 — 약 2년 보관(용량 ~1MB 수준, 2026-07-07 확장)
 const REFRESH_RECENT = 2; // 최근 N일은 캐시에 있어도 재수집(늦게 도착한 측정 반영)
 
 // 일별 스냅샷(각 필드 없으면 그 날 그 값 없음): perIsp[ispId][dayMs] = { bd,bu,li,ll,ji,jl,pl }

@@ -5,9 +5,15 @@
 //       BigQuery REST 쿼리. 외부 npm 의존성 없음.
 // 비용: 각 쿼리의 totalBytesProcessed 를 로그로 출력(무료 1TB/월 확인). 기간 상한으로 스캔 제한.
 //
+// 누적 구조(2026-07-07): coarse(1일)는 매일 최근 며칠만 증분 조회해 기존 캐시에 병합·축적(약 2년 보관).
+//   → 기존 "매일 90일 재조회" 대비 스캔 ~70% 감소(월 ~0.3TB, 무료 1TB 한도 내 = 비용 0).
+//   mid(1시간)는 표시 창이 30일뿐이라 기존대로 30일 창을 통째로 재조회(교체).
+//   과거 백필: MLAB_BACKFILL_DAYS(기본 4)·MLAB_BACKFILL_OFFSET(기본 0)으로 창 지정 —
+//   예) DAYS=90 OFFSET=90 → 180~90일 전 구간. CAP_GB 상한 안에서 90일씩 나눠 수동 실행.
+//
 // 실행: node scripts/collect-mlab.ts   (MLAB_BQ_KEY / MLAB_BQ_PROJECT 필요)
 
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSign } from 'node:crypto';
@@ -71,8 +77,8 @@ async function bq(token: string, query: string, dryRun = false): Promise<{ rows:
 
 const CAP_GB = 50; // 쿼리당 스캔 상한(안전). 초과 시 중단 — 의도치 않은 대량 과금 방지.
 
-// 한 티어 쿼리: bucketExpr(버킷 시작 ms), days(기간 상한)
-function buildQuery(bucketExpr: string, days: number): string {
+// 한 티어 쿼리: bucketExpr(버킷 시작 ms), startDays~endDays(일 전) 구간
+function buildQuery(bucketExpr: string, startDays: number, endDays: number): string {
   // hd/k4: 다운로드 처리량이 Netflix 권장 HD(5Mbps)/4K(15Mbps) 이상인 측정의 비율(%).
   // rtt_floor/thr_peak: MinRTT 하위10% 평균 / MeanThroughputMbps 상위10% 평균.
   //   분위수 스케치(APPROX_QUANTILES 100분할)의 꼬리 오프셋 평균으로 단일 패스 근사 → 추가 스캔 비용 0.
@@ -92,20 +98,32 @@ FROM (
     APPROX_QUANTILES(a.MinRTT, 100) AS rtt_q,
     APPROX_QUANTILES(a.MeanThroughputMbps, 100) AS thr_q
   FROM \`measurement-lab.ndt.ndt7\`
-  WHERE date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL ${days} DAY) AND CURRENT_DATE()
+  WHERE date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL ${startDays} DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL ${endDays} DAY)
     AND client.Network.ASNumber IN (${ASN_LIST.join(', ')})
     AND a.MeanThroughputMbps IS NOT NULL
   GROUP BY asn, bucket
 )`;
 }
 
+// coarse 증분 창: 기본 최근 4일(발행 지연 1~2일 + 여유). 수동 백필 시 env로 조정.
+const BF_DAYS = Math.min(Math.max(Number(process.env.MLAB_BACKFILL_DAYS) || 4, 2), 120);
+const BF_OFFSET = Math.min(Math.max(Number(process.env.MLAB_BACKFILL_OFFSET) || 0, 0), 800);
+const KEEP_DAYS = 800; // coarse 누적 보관 기간(약 2년)
+
 const TIERS = [
-  { key: 'mid', days: 30, bucket: 'UNIX_MILLIS(TIMESTAMP_TRUNC(a.TestTime, HOUR))' },
-  { key: 'coarse', days: 90, bucket: 'UNIX_MILLIS(TIMESTAMP_TRUNC(a.TestTime, DAY))' },
+  { key: 'mid', start: 30, end: 0, bucket: 'UNIX_MILLIS(TIMESTAMP_TRUNC(a.TestTime, HOUR))', mode: 'replace' as const },
+  { key: 'coarse', start: BF_OFFSET + BF_DAYS, end: BF_OFFSET, bucket: 'UNIX_MILLIS(TIMESTAMP_TRUNC(a.TestTime, DAY))', mode: 'merge' as const },
 ];
 
 interface Cell { v: number; n: number; }
 type TierMetricMap = Record<string, Cell>; // bucketMs -> cell
+const FIELDS = ['thr', 'rtt', 'loss', 'hd', 'k4', 'rttFloor', 'thrPeak'] as const;
+
+// 기존 캐시 로드(누적 병합의 기반). 없으면 빈 구조.
+async function loadOldCache(): Promise<Record<string, Record<string, Record<string, TierMetricMap>>>> {
+  try { return (JSON.parse(await readFile(OUT, 'utf8')) as { perIsp?: any }).perIsp ?? {}; }
+  catch { return {}; }
+}
 
 async function main() {
   if (!KEY || !PROJECT) { console.log('[mlab] MLAB_BQ_KEY/MLAB_BQ_PROJECT 없음 → 수집 생략'); return; }
@@ -116,7 +134,7 @@ async function main() {
   // ── 비용 사전 점검: dry-run(무과금)으로 예상 스캔량 먼저 확인, 상한 초과 시 중단 ──
   let estTotal = 0;
   for (const t of TIERS) {
-    const { bytes } = await bq(token, buildQuery(t.bucket, t.days), true);
+    const { bytes } = await bq(token, buildQuery(t.bucket, t.start, t.end), true);
     estTotal += bytes;
     const gb = bytes / 1e9;
     console.log(`[mlab] ${t.key} 예상 스캔 ${gb.toFixed(2)}GB (dry-run·무과금)`);
@@ -125,11 +143,14 @@ async function main() {
   console.log(`[mlab] 총 예상 ${(estTotal / 1e9).toFixed(2)}GB/회 → 일1회 가정 월 ~${(estTotal / 1e9 * 30).toFixed(0)}GB (무료 1000GB/월 대비)`);
 
   // perIsp[ispId][tier] = { thr, rtt, loss, hd, k4, rttFloor, thrPeak }
-  const perIsp: Record<string, Record<string, Record<string, TierMetricMap>>> = {};
+  // 기존 캐시에서 시작: mid는 이번 결과로 교체, coarse는 버킷 단위 병합(누적).
+  const perIsp = await loadOldCache();
+  const oldSnaps = Object.values(perIsp).reduce((a, t) => a + Object.keys(t?.coarse?.thr ?? {}).length, 0);
+  console.log(`[mlab] 기존 캐시 coarse 스냅샷 ${oldSnaps}개 로드(누적 병합 기반)`);
   let totalBytes = 0;
 
   for (const t of TIERS) {
-    const { rows, bytes } = await bq(token, buildQuery(t.bucket, t.days));
+    const { rows, bytes } = await bq(token, buildQuery(t.bucket, t.start, t.end));
     totalBytes += bytes;
     console.log(`[mlab] ${t.key}: rows=${rows.length} scanned=${(bytes / 1e9).toFixed(2)}GB`);
     // 다중 ASN ISP 합산: thr/rtt/loss는 n 가중평균, hd/k4는 카운트 합산.
@@ -149,7 +170,15 @@ async function main() {
       }
     }
     for (const isp of Object.keys(acc)) {
-      perIsp[isp] ??= {}; perIsp[isp][t.key] = { thr: {}, rtt: {}, loss: {}, hd: {}, k4: {}, rttFloor: {}, thrPeak: {} };
+      perIsp[isp] ??= {};
+      if (t.mode === 'replace') {
+        // mid: 표시 창(30일)을 통째로 최신 결과로 교체.
+        perIsp[isp][t.key] = { thr: {}, rtt: {}, loss: {}, hd: {}, k4: {}, rttFloor: {}, thrPeak: {} };
+      } else {
+        // coarse: 기존 버킷 유지 + 이번 조회 구간만 갱신(누적).
+        perIsp[isp][t.key] ??= {} as Record<string, TierMetricMap>;
+        for (const f of FIELDS) perIsp[isp][t.key][f] ??= {};
+      }
       for (const [bucket, c] of Object.entries(acc[isp][t.key])) {
         const w = c.sw || 1;
         perIsp[isp][t.key].thr[bucket] = { v: round(c.thr / w), n: c.n };
@@ -163,9 +192,19 @@ async function main() {
     }
   }
 
+  // coarse 보관 기간 정리(약 2년 초과분 제거).
+  const cutoff = Math.floor(Date.now() / 86400000) * 86400000 - KEEP_DAYS * 86400000;
+  for (const tiers of Object.values(perIsp)) {
+    const coarse = tiers?.coarse; if (!coarse) continue;
+    for (const f of Object.keys(coarse)) {
+      for (const k of Object.keys(coarse[f])) if (Number(k) < cutoff) delete coarse[f][k];
+    }
+  }
+  const newSnaps = Object.values(perIsp).reduce((a, t) => a + Object.keys(t?.coarse?.thr ?? {}).length, 0);
+
   const payload = { generatedAt: new Date().toISOString(), totalBytes, perIsp };
   await writeFile(OUT, JSON.stringify(payload));
-  console.log(`[mlab] wrote ${OUT} · 총 스캔 ${(totalBytes / 1e9).toFixed(2)}GB (무료 1TB/월 기준 확인)`);
+  console.log(`[mlab] wrote ${OUT} · coarse 스냅샷 ${newSnaps}개 · 총 스캔 ${(totalBytes / 1e9).toFixed(2)}GB (무료 1TB/월 기준 확인)`);
 }
 
 const round = (x: number) => Math.round(x * 1000) / 1000;

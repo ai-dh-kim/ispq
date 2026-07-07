@@ -6,7 +6,16 @@ name: Collect M-Lab (daily)
 on:
   schedule:
     - cron: '17 5 * * *' # 매일 05:17 UTC (정시 혼잡 회피)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      backfill_days:
+        description: 'coarse 증분 창(일). 기본 4. 과거 백필 시 90 권장(CAP_GB 상한 내)'
+        required: false
+        default: '4'
+      backfill_offset:
+        description: '몇 일 전부터 거슬러 백필할지 오프셋. 예) days=90+offset=90 → 180~90일 전 구간'
+        required: false
+        default: '0'
 
 concurrency:
   group: collect-mlab
@@ -31,6 +40,8 @@ jobs:
         env:
           MLAB_BQ_KEY: ${{ secrets.MLAB_BQ_KEY }}       # 서비스계정 JSON 키 전체
           MLAB_BQ_PROJECT: ${{ secrets.MLAB_BQ_PROJECT }} # GCP 프로젝트 ID
+          MLAB_BACKFILL_DAYS: ${{ github.event.inputs.backfill_days || '4' }}
+          MLAB_BACKFILL_OFFSET: ${{ github.event.inputs.backfill_offset || '0' }}
         run: node scripts/collect-mlab.ts
 
       - name: Commit cache

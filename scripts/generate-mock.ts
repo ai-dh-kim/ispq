@@ -55,6 +55,19 @@ const SPEED_FIELD: Record<string, keyof SpeedSnap> = {
   downloadBandwidth: 'bd', uploadBandwidth: 'bu', loadedLatency: 'll', jitter: 'ji', packetLoss: 'pl',
 };
 
+// IQI 일별 스냅샷 캐시(collect-iqi.ts가 하루 1회 누적): Radar 이력 한계(~90일) 밖의
+// 과거 coarse(1일) 버킷을 채운다. 라이브 IQI가 있는 버킷은 라이브 우선.
+const IQI_CACHE = resolve(__dir, '../public/iqi_cache.json');
+type IqiSnap = { lat?: number; bw?: number; p25?: number; dns?: number; v6?: number };
+type IqiCache = { perIsp: Record<string, Record<string, IqiSnap>> };
+async function loadIqiCache(): Promise<IqiCache | null> {
+  try { return JSON.parse(await readFile(IQI_CACHE, 'utf8')) as IqiCache; }
+  catch { return null; }
+}
+const IQI_CACHE_FIELD: Record<string, keyof IqiSnap> = {
+  latency: 'lat', bandwidth: 'bw', p25Throughput: 'p25', dnsResponse: 'dns', ipv6: 'v6',
+};
+
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
 const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
 type NetflixCache = { perIsp: Record<string, { ym: string; speed: number }[]> };
@@ -364,6 +377,8 @@ async function main() {
   if (netflix) console.log(`[netflix] 캐시 로드됨 (ISP ${netflix.size}개)`);
   const speed = await loadSpeedCache(); // Cloudflare Speed Test 일별 캐시
   if (speed) console.log(`[speed] 캐시 로드됨 (ISP ${Object.keys(speed.perIsp ?? {}).length}개)`);
+  const iqi = await loadIqiCache(); // IQI 일별 스냅샷 캐시(장기 보관 — 라이브 90일 밖 보완)
+  if (iqi) console.log(`[iqi] 캐시 로드됨 (ISP ${Object.keys(iqi.perIsp ?? {}).length}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -383,7 +398,7 @@ async function main() {
       // 이 지표가 이번 실행에서 "실데이터 연동" 상태인지(=실어댑터가 켜짐). 그러면 데이터 없는 구간은
       // 시뮬로 채우지 않고 빈칸으로 둔다(가짜 값으로 인한 해석 혼선 방지). 비연동이면 기존대로 시뮬.
       const liveConnected =
-        (CF_METRIC_FIELD[metric.id] != null && !!CF_TOKEN) ||
+        (CF_METRIC_FIELD[metric.id] != null && (!!CF_TOKEN || !!iqi)) ||
         (MLAB_FIELD[metric.id] != null && !!mlab) ||
         (SPEED_FIELD[metric.id] != null && !!speed) ||
         (metric.id === 'nfSpeedIndex' && !!netflix);
@@ -403,8 +418,15 @@ async function main() {
           const mlField = MLAB_FIELD[metric.id];
           const mlReal = mlField ? mlab?.perIsp?.[isp.id]?.[g.key]?.[mlField]?.[String(t)] : undefined;
           const nfReal = metric.id === 'nfSpeedIndex' ? nfSpeedAt(netflix?.get(isp.id), t) : undefined;
+          // IQI 캐시(일별 누적): 라이브 IQI가 못 채우는 과거 coarse 버킷 보완(90일 이력 한계 밖).
+          const iqField = IQI_CACHE_FIELD[metric.id];
+          const iqReal = iqField && g.key === 'coarse'
+            ? iqi?.perIsp?.[isp.id]?.[String(t)]?.[iqField] : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
+          } else if (iqReal != null && Number.isFinite(iqReal)) {
+            const clamped = Math.min(Math.max(iqReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
           } else if (spReal != null && Number.isFinite(spReal)) {
             const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
