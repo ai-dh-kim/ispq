@@ -107,7 +107,12 @@ export default function App() {
         <div className="spacer" />
 
         <label className="field">{T.source}
-          <select value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
+          <select value={sourceId} onChange={(e) => {
+            const s = e.target.value;
+            setSourceId(s);
+            // Speed Test는 하루 1회 집계 → 기간 30일·집계 1일로 자동 맞춤(7일/1시간은 무의미).
+            if (s === 'cfspeed') { setRange('30d'); setView('1day'); }
+          }}>
             {Object.values(SOURCES).map((src) => (
               <option key={src.id} value={src.id}>{src.label}</option>
             ))}

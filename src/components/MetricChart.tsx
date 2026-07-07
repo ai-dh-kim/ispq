@@ -147,9 +147,9 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
 
   // 지연 발행 지표(M-Lab ~1~2일 / dailyCadence 하루 1회): X축을 '최신 실데이터' 지점에서 멈춘다(현재까지 끌고 가지 않음).
   // 창 너비(선택 기간)는 유지하고 오른쪽 끝만 lastLiveMs로 당겨, 끝의 빈 구간이 안 보이게 한다.
-  // dailyCadence는 하루 1회 집계라 짧은 기간이 무의미 → 기본 90일(보유 전체)을 창으로.
-  // (상단 기간 선택이 더 길면 그걸 따르되, 하한을 90일로 고정.)
-  const winMs = DAILY ? Math.max(RANGES[range].ms, 90 * 86400000) : RANGES[range].ms;
+  // dailyCadence는 하루 1회 집계 → 상단 기간 선택을 그대로 따름(cfspeed 선택 시 App.tsx가 30일로 자동 설정).
+  // 단 24시간·2일처럼 너무 짧으면 점 1~2개뿐이라 창 하한만 7일로 보장.
+  const winMs = DAILY ? Math.max(RANGES[range].ms, 7 * 86400000) : RANGES[range].ms;
   const lagCap = (!!metric.mlabBased || DAILY) && lastLiveMs != null && lastLiveMs < maxMs;
   const xMax = lagCap ? (lastLiveMs as number) : maxMs;
   const xMin = lagCap ? (lastLiveMs as number) - winMs : DAILY ? maxMs - winMs : effSince;
