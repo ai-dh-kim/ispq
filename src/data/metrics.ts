@@ -44,7 +44,8 @@ export const SOURCES: Record<string, SourceDef> = {
   // Speed Test는 같은 Cloudflare지만 측정 방식이 다름(실트래픽 수동측정 vs 사용자 자발 실행 능동측정) → 별도 출처 탭.
   cfspeed: { id: 'cfspeed', label: 'Cloudflare Speed Test' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
-  netflix: { id: 'netflix', label: 'Netflix 스트리밍 품질 (ISP Speed Index)' },
+  // 단일 지표 출처들을 묶은 탭: Netflix Speed Index + APNIC DNSSEC (2026-07-08 netflix 탭에서 개편).
+  etc: { id: 'etc', label: '기타 (Netflix · APNIC)' },
 };
 
 // Netflix 스트리밍 품질 등급(rating_grade) 임계값.
@@ -74,6 +75,11 @@ export const METRICS: MetricDef[] = [
   { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
     cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/',
       note: '※ Cloudflare HTTP 트래픽 중 IPv6 비율(실측)입니다. 한국 유선망은 IPv6 도입률이 낮아 일부 ISP(예: KT·SK브로드밴드)는 0%에 가깝게 나올 수 있으며, 이는 측정값이지 오류가 아닙니다.' } },
+  // RPKI 라우팅 보안: ISP가 광고하는 BGP 경로 중 암호학적으로 검증(RPKI valid)되는 비율 — 경로 하이재킹 방어 수준.
+  // API가 현재 상태만 제공 → collect-iqi.ts가 매일 스냅샷을 누적(수집 시작 2026-07-08 이후 이력만 존재).
+  { id: 'rpkiValid', name: 'RPKI 라우팅 보안 적용률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Cloudflare Radar 라우팅: ASN별 BGP 경로 중 RPKI 유효(valid) 비율 — 공개 BGP 데이터 기반, 2시간 주기 갱신', url: 'https://radar.cloudflare.com/routing',
+      note: '※ 경로 위·변조(BGP 하이재킹)에 대한 방어 수준입니다. 높을수록 이 통신사가 인터넷에 광고하는 경로가 암호학적으로 검증됩니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
 
   // --- Cloudflare Speed Test (speed.cloudflare.com) ---
   // 사용자가 자발적으로 실행한 스피드테스트의 ASN별 일별 집계(collect-speedtest.ts 캐시).
@@ -121,10 +127,14 @@ export const METRICS: MetricDef[] = [
   { id: 'nf4k', name: '4K 스트리밍 가능률 (≥15Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, mlabBased: true, pctFull: true,
     cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306' } },
 
-  // --- Netflix 스트리밍 품질 (Netflix가 직접 공개한 값) ---
+  // --- 기타 (단일 지표 출처 묶음: Netflix · APNIC) ---
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
-  { id: 'nfSpeedIndex', name: 'ISP Speed Index (프라임타임 평균)', source: 'netflix', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
+  { id: 'nfSpeedIndex', name: 'Netflix ISP Speed Index (프라임타임 평균)', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
+  // DNSSEC 검증률: 이 통신사 이용자 중 DNS 응답 위조를 검증(DNSSEC)하는 리졸버 사용 비율. APNIC(아태 IP주소 관리기구) 실측.
+  { id: 'dnssec', name: 'DNSSEC 검증률', source: 'etc', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'APNIC Labs: ASN별 DNSSEC 검증 사용자 비율 실측(구글 광고망 대규모 표본, 일별)', url: 'https://stats.labs.apnic.net/dnssec',
+      note: '※ DNS 응답 위조(파밍 등)를 검증하는 이용자 비율입니다. 한국 ISP는 전반적으로 낮은 편이라 절대값보다 ISP 간 비교·추세로 보세요. 표본수(n)는 툴팁에 표시됩니다.' } },
 ];
 
 // 값에 해당하는 rating_grade 라벨 (grades 미지정 지표는 null).

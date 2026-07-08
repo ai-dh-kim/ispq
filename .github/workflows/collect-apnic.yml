@@ -1,0 +1,43 @@
+# APNIC Labs DNSSEC 검증률 수집 (하루 1회). 공개 엔드포인트라 인증/시크릿 불필요.
+# ASN별 일별 시계열(2013~현재)을 받아 최근 800일을 public/apnic_cache.json 에 캐시.
+name: Collect APNIC DNSSEC (daily)
+
+on:
+  schedule:
+    - cron: '53 5 * * *' # 매일 05:53 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: collect-apnic
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apnic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Fetch APNIC DNSSEC series → apnic_cache.json
+        run: node scripts/collect-apnic.ts
+
+      - name: Commit cache
+        run: |
+          git config user.name "quality-bot"
+          git config user.email "quality-bot@users.noreply.github.com"
+          git add public/apnic_cache.json
+          if git diff --cached --quiet; then
+            echo "No APNIC cache changes."
+          else
+            git commit -m "chore(data): APNIC DNSSEC daily cache [skip ci]"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

@@ -58,7 +58,7 @@ const SPEED_FIELD: Record<string, keyof SpeedSnap> = {
 // IQI 일별 스냅샷 캐시(collect-iqi.ts가 하루 1회 누적): Radar 이력 한계(~90일) 밖의
 // 과거 coarse(1일) 버킷을 채운다. 라이브 IQI가 있는 버킷은 라이브 우선.
 const IQI_CACHE = resolve(__dir, '../public/iqi_cache.json');
-type IqiSnap = { lat?: number; bw?: number; p25?: number; dns?: number; v6?: number };
+type IqiSnap = { lat?: number; bw?: number; p25?: number; dns?: number; v6?: number; rpki?: number };
 type IqiCache = { perIsp: Record<string, Record<string, IqiSnap>> };
 async function loadIqiCache(): Promise<IqiCache | null> {
   try { return JSON.parse(await readFile(IQI_CACHE, 'utf8')) as IqiCache; }
@@ -67,6 +67,17 @@ async function loadIqiCache(): Promise<IqiCache | null> {
 const IQI_CACHE_FIELD: Record<string, keyof IqiSnap> = {
   latency: 'lat', bandwidth: 'bw', p25Throughput: 'p25', dnsResponse: 'dns', ipv6: 'v6',
 };
+// IQI 캐시의 일별 스냅샷 전용 지표(라이브 IQI에 없음) — Speed Test처럼 버킷의 날짜값을 전 티어에 사용.
+const IQI_DAILY_FIELD: Record<string, keyof IqiSnap> = { rpkiValid: 'rpki' };
+
+// APNIC 캐시(collect-apnic.ts): perIsp[ispId][dayMs] = { dv: DNSSEC 검증률(%), n: 표본수 }.
+const APNIC_CACHE = resolve(__dir, '../public/apnic_cache.json');
+type ApnicCache = { perIsp: Record<string, Record<string, { dv: number; n: number }>> };
+async function loadApnicCache(): Promise<ApnicCache | null> {
+  try { return JSON.parse(await readFile(APNIC_CACHE, 'utf8')) as ApnicCache; }
+  catch { return null; }
+}
+const APNIC_METRIC = 'dnssec';
 
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
 const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
@@ -131,13 +142,15 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   latencyFloor: { good: 4, spread: 0.12, busy: 0.08 }, // 하위10% 평균: 최소RTT보다 낮은 '지연 바닥'
   lossRate: { good: 0.1, spread: 1.0, busy: 2.0 },
   ipv6: { good: 40, spread: 0.1, busy: 0 }, // IPv6 채택률(%): 시간대 무관, 지역별 차이
+  rpkiValid: { good: 70, spread: 0.08, busy: 0 }, // RPKI 유효율(%): 시간대 무관
+  dnssec: { good: 30, spread: 0.2, busy: 0 }, // DNSSEC 검증률(%): 시간대 무관
   dnsResponse: { good: 18, spread: 0.3, busy: 0.4 }, // DNS 응답시간(ms): 낮을수록 좋음
   // Netflix 스트리밍 품질: HD/4K 가능 비율은 부하에 떨어지고(4K가 더 민감), Speed Index(Mbps)도 소폭 하락.
   nfHd: { good: 96, spread: 0.03, busy: -0.12 },
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'rpkiValid', 'dnssec', 'nfHd', 'nf4k', 'nfSpeedIndex']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)
@@ -377,8 +390,10 @@ async function main() {
   if (netflix) console.log(`[netflix] 캐시 로드됨 (ISP ${netflix.size}개)`);
   const speed = await loadSpeedCache(); // Cloudflare Speed Test 일별 캐시
   if (speed) console.log(`[speed] 캐시 로드됨 (ISP ${Object.keys(speed.perIsp ?? {}).length}개)`);
-  const iqi = await loadIqiCache(); // IQI 일별 스냅샷 캐시(장기 보관 — 라이브 90일 밖 보완)
+  const iqi = await loadIqiCache(); // IQI 일별 스냅샷 캐시(장기 보관 — 라이브 90일 밖 보완 + rpki)
   if (iqi) console.log(`[iqi] 캐시 로드됨 (ISP ${Object.keys(iqi.perIsp ?? {}).length}개)`);
+  const apnic = await loadApnicCache(); // APNIC DNSSEC 일별 캐시
+  if (apnic) console.log(`[apnic] 캐시 로드됨 (ISP ${Object.keys(apnic.perIsp ?? {}).length}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -399,8 +414,10 @@ async function main() {
       // 시뮬로 채우지 않고 빈칸으로 둔다(가짜 값으로 인한 해석 혼선 방지). 비연동이면 기존대로 시뮬.
       const liveConnected =
         (CF_METRIC_FIELD[metric.id] != null && (!!CF_TOKEN || !!iqi)) ||
+        (IQI_DAILY_FIELD[metric.id] != null && !!iqi) ||
         (MLAB_FIELD[metric.id] != null && !!mlab) ||
         (SPEED_FIELD[metric.id] != null && !!speed) ||
+        (metric.id === APNIC_METRIC && !!apnic) ||
         (metric.id === 'nfSpeedIndex' && !!netflix);
       const entry = {} as Record<TierKey, TierBlock>;
       for (const g of TIER_GEN) {
@@ -422,12 +439,24 @@ async function main() {
           const iqField = IQI_CACHE_FIELD[metric.id];
           const iqReal = iqField && g.key === 'coarse'
             ? iqi?.perIsp?.[isp.id]?.[String(t)]?.[iqField] : undefined;
+          const dayKey = String(Math.floor(t / DAY) * DAY);
+          // IQI 캐시 전용 일별 지표(rpki): Speed Test처럼 그 날의 값을 전 티어에 사용.
+          const iqDailyField = IQI_DAILY_FIELD[metric.id];
+          const iqDailyReal = iqDailyField ? iqi?.perIsp?.[isp.id]?.[dayKey]?.[iqDailyField] : undefined;
+          // APNIC DNSSEC: 일별 값 + 실표본수(n).
+          const apnicReal = metric.id === APNIC_METRIC ? apnic?.perIsp?.[isp.id]?.[dayKey] : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
           } else if (iqReal != null && Number.isFinite(iqReal)) {
             const clamped = Math.min(Math.max(iqReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
+          } else if (iqDailyReal != null && Number.isFinite(iqDailyReal)) {
+            const clamped = Math.min(Math.max(iqDailyReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
+          } else if (apnicReal && Number.isFinite(apnicReal.dv)) {
+            const clamped = Math.min(Math.max(apnicReal.dv, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(apnicReal.n); k.push(apnicReal.n); live++; liveMetricSet.add(metric.id); // 실표본수 제공
           } else if (spReal != null && Number.isFinite(spReal)) {
             const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기

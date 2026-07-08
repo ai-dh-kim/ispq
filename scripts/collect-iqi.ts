@@ -17,12 +17,14 @@ const OUT = resolve(__dir, '../public/iqi_cache.json');
 const DAY = 86400000;
 const IQI_API = 'https://api.cloudflare.com/client/v4/radar/quality/iqi/timeseries_groups';
 const IPV6_API = 'https://api.cloudflare.com/client/v4/radar/http/timeseries_groups/ip_version';
+const BGP_STATS_API = 'https://api.cloudflare.com/client/v4/radar/bgp/routes/stats'; // RPKI 현재 스냅샷(이력 미제공)
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const BACKFILL_DAYS = Math.min(Math.max(Number(process.env.BACKFILL_DAYS) || 7, 2), 90); // API 이력 ~90일
 const KEEP_DAYS = 800; // 약 2년 보관(용량 ~1MB 수준)
 
-// 일별 스냅샷: perIsp[ispId][dayMs] = { lat, bw, p25, dns, v6 } (없는 필드는 그 날 값 없음)
-type DaySnap = { lat?: number; bw?: number; p25?: number; dns?: number; v6?: number };
+// 일별 스냅샷: perIsp[ispId][dayMs] = { lat, bw, p25, dns, v6, rpki } (없는 필드는 그 날 값 없음)
+// rpki: BGP 경로 중 RPKI 유효(valid) 비율(%) — API가 현재 상태만 제공하므로 '오늘' 날짜에 기록해 누적.
+type DaySnap = { lat?: number; bw?: number; p25?: number; dns?: number; v6?: number; rpki?: number };
 type Cache = { generatedAt: string; unitNote: string; perIsp: Record<string, Record<string, DaySnap>> };
 
 async function loadCache(): Promise<Cache['perIsp']> {
@@ -64,6 +66,20 @@ async function iqiSeries(asns: string[], metric: 'LATENCY' | 'BANDWIDTH' | 'DNS'
   return (await cfGet(url))?.result?.serie_0;
 }
 
+// ASN 1개의 RPKI 유효율(%) — routes_valid / routes_total. 실패 시 null.
+const rpkiLog = { done: false };
+async function rpkiPct(asnNum: string): Promise<{ valid: number; total: number } | null> {
+  const url = new URL(BGP_STATS_API);
+  url.searchParams.set('asn', asnNum);
+  url.searchParams.set('format', 'JSON');
+  const json: any = await cfGet(url);
+  const s = json?.result?.stats;
+  if (!rpkiLog.done && s) { console.log(`[iqi] rpki raw stats(AS${asnNum})=${JSON.stringify(s).slice(0, 300)}`); rpkiLog.done = true; }
+  const valid = Number(s?.routes_valid); const total = Number(s?.routes_total);
+  if (!Number.isFinite(valid) || !Number.isFinite(total) || total <= 0) return null;
+  return { valid, total };
+}
+
 async function main() {
   if (!TOKEN) { console.error('[iqi] CLOUDFLARE_API_TOKEN 없음 → 수집 불가(캐시 미변경)'); process.exit(1); }
 
@@ -72,6 +88,10 @@ async function main() {
   const ds = isoSec(now - BACKFILL_DAYS * DAY);
   const de = isoSec(now);
   const cutoff = Math.floor(now / DAY) * DAY - KEEP_DAYS * DAY;
+  const today = Math.floor(now / DAY) * DAY;
+
+  // RPKI: ASN별 현재 스냅샷을 1회씩 조회(중복 ASN 캐시) 후 ISP별 합산.
+  const rpkiByAsn = new Map<string, { valid: number; total: number } | null>();
 
   let ok = 0, fail = 0;
   for (const isp of ALL_ISPS) {
@@ -101,12 +121,23 @@ async function main() {
       const serie = (await cfGet(url))?.result?.serie_0;
       put(serieToDays(serie, 'IPv6'), 'v6'); ok++;
     } catch (e) { fail++; console.warn(`[iqi] ${isp.id}/IPv6 skip: ${(e as Error).message}`); }
+    // RPKI 유효율: ASN별 카운트를 합산해 오늘 날짜 스냅샷으로 기록(멀티 ASN은 경로 수 가중 자동 반영).
+    try {
+      let valid = 0, total = 0;
+      for (const asn of isp.asns) {
+        const num = asn.replace(/^AS/i, '');
+        if (!rpkiByAsn.has(num)) rpkiByAsn.set(num, await rpkiPct(num));
+        const r = rpkiByAsn.get(num);
+        if (r) { valid += r.valid; total += r.total; }
+      }
+      if (total > 0) { (days[String(today)] ??= {}).rpki = round3((valid / total) * 100); ok++; }
+    } catch (e) { fail++; console.warn(`[iqi] ${isp.id}/RPKI skip: ${(e as Error).message}`); }
     await new Promise((r) => setTimeout(r, 120)); // 레이트리밋 완화
   }
 
   const payload: Cache = {
     generatedAt: new Date().toISOString(),
-    unitNote: 'lat/dns: ms(p50), bw/p25: Mbps, v6: % — Radar IQI/HTTP 일별 집계(dayMs=UTC 자정 epoch ms)',
+    unitNote: 'lat/dns: ms(p50), bw/p25: Mbps, v6: %, rpki: %(BGP 경로 RPKI 유효율·당일 스냅샷) — dayMs=UTC 자정 epoch ms',
     perIsp,
   };
   await writeFile(OUT, JSON.stringify(payload));
