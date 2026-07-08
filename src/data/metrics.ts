@@ -133,8 +133,8 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
   // DNSSEC 검증률: 이 통신사 이용자 중 DNS 응답 위조를 검증(DNSSEC)하는 리졸버 사용 비율. APNIC(아태 IP주소 관리기구) 실측.
   { id: 'dnssec', name: 'DNSSEC 검증률', source: 'etc', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true,
-    cite: { grade: 'A', basis: 'APNIC Labs: ASN별 DNSSEC 검증 사용자 비율 실측(구글 광고망 대규모 표본, 일별)', url: 'https://stats.labs.apnic.net/dnssec',
-      note: '※ DNS 응답 위조(파밍 등)를 검증하는 이용자 비율입니다. 한국 ISP는 전반적으로 낮은 편이라 절대값보다 ISP 간 비교·추세로 보세요. 표본수(n)는 툴팁에 표시됩니다.' } },
+    cite: { grade: 'A', basis: 'APNIC Labs(아시아·태평양 IP주소 관리기구): ASN별 DNSSEC 검증 사용자 비율 실측(구글 광고망 대규모 표본, 일별)', url: 'https://stats.labs.apnic.net/dnssec',
+      note: '※ 쉽게 말해 "가짜 사이트로 연결되지 않도록, 인터넷 주소 안내(DNS) 응답의 위조 여부를 자동 검사받는 이용자 비율"입니다. 이 검사는 주로 통신사가 기본 제공하는 DNS 서버에서 수행되므로, 통신사가 켜두면 ~99%(해외 주요 ISP 수준), 꺼두면 구글 DNS(8.8.8.8) 등으로 직접 바꾼 이용자만 집계되어 한 자릿수(KT·LG U+ ~2%)로 나옵니다. SK브로드밴드의 중간값(~40%대)은 일부 DNS 서버·가입자망에만 적용된 부분 도입 상태로 해석됩니다. 표본수(n)는 값 위에 마우스를 올리면 표시됩니다.' } },
 ];
 
 // 값에 해당하는 rating_grade 라벨 (grades 미지정 지표는 null).
