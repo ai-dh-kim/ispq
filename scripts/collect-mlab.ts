@@ -125,15 +125,66 @@ async function loadOldCache(): Promise<Record<string, Record<string, Record<stri
   catch { return {}; }
 }
 
+// ── 저표본 자동 재조회 (2026-07-10) ──
+// M-Lab 발행 파이프라인 공백이 증분 창(기본 4일)을 벗어난 뒤에 백필되면, 그 날짜가
+// 표본 1~2건짜리 스냅샷으로 캐시에 영구히 남는다(실사례: 2026-07-02~04, ISP 다수 동시 붕괴).
+// 방지: 최근 RETRY_DAYS 안에서 어느 ISP든 그 날 표본수가 "자기 최근 30일 중앙값"의
+// RETRY_RATIO 미만이면 coarse 조회 창을 그 날까지 넓혀 다시 받는다. 공백이 ISP(사이트)별로
+// 다르게 백필되므로 전체 합이 아닌 ISP별 판정이어야 한다. 평소 표본이 적은 ISP(중앙값<MIN_MEDIAN)는
+// 상시 재조회를 막기 위해 제외. 백필이 아직 안 됐으면 다음 실행이 다시 시도하고,
+// RETRY_DAYS를 지나면 포기(스캔 비용은 창 최대 14일로 유계 — 무료 한도 내).
+const RETRY_DAYS = 14;
+const RETRY_RATIO = 0.05;
+const MIN_MEDIAN = 200;
+function lowSampleLookbackDays(perIsp: Record<string, Record<string, Record<string, TierMetricMap>>>): number {
+  const DAY = 86400000;
+  const today = Math.floor(Date.now() / DAY) * DAY;
+  let lookback = 0;
+  for (const [ispId, tiers] of Object.entries(perIsp)) {
+    const thr = tiers?.coarse?.thr; if (!thr) continue;
+    const recent: [number, number][] = [];
+    for (const [k, c] of Object.entries(thr)) {
+      const t = Number(k);
+      if (t >= today - 30 * DAY) recent.push([t, c?.n ?? 0]);
+    }
+    if (recent.length < 8) continue; // 이력이 짧으면 판단하지 않음
+    const counts = recent.map((x) => x[1]).sort((a, b) => a - b);
+    const median = counts[Math.floor(counts.length / 2)];
+    if (median < MIN_MEDIAN) continue;
+    const byDay = new Map(recent);
+    for (let d = BF_DAYS + 1; d <= RETRY_DAYS; d++) {
+      const n = byDay.get(today - d * DAY) ?? 0; // 아예 빈 날도 재조회 대상
+      if (n < median * RETRY_RATIO && d > lookback) {
+        lookback = d;
+        console.log(`[mlab] 저표본: ${ispId} ${new Date(today - d * DAY).toISOString().slice(0, 10)} n=${n} (중앙값 ${median})`);
+      }
+    }
+  }
+  return lookback;
+}
+
 async function main() {
   if (!KEY || !PROJECT) { console.log('[mlab] MLAB_BQ_KEY/MLAB_BQ_PROJECT 없음 → 수집 생략'); return; }
   const sa = JSON.parse(KEY) as { client_email: string; private_key: string };
   const token = await getAccessToken(sa);
   console.log(`[mlab] auth OK · project=${PROJECT} · ASN ${ASN_LIST.length}개`);
 
+  // perIsp[ispId][tier] = { thr, rtt, loss, hd, k4, rttFloor, thrPeak }
+  // 기존 캐시를 먼저 로드: 누적 병합의 기반 + 저표본 재조회 판단에 사용.
+  const perIsp = await loadOldCache();
+  const oldSnaps = Object.values(perIsp).reduce((a, t) => a + Object.keys(t?.coarse?.thr ?? {}).length, 0);
+  console.log(`[mlab] 기존 캐시 coarse 스냅샷 ${oldSnaps}개 로드(누적 병합 기반)`);
+
+  // 저표본 자동 재조회: 수동 백필(BF_OFFSET>0) 중에는 끔.
+  const retryLB = BF_OFFSET === 0 ? lowSampleLookbackDays(perIsp) : 0;
+  if (retryLB > BF_DAYS) console.log(`[mlab] 저표본 날짜 감지 → coarse 창을 최근 ${retryLB}일로 확장(발행 공백 백필 재조회)`);
+  const tiers = retryLB > BF_DAYS
+    ? TIERS.map((t) => (t.key === 'coarse' ? { ...t, start: retryLB } : t))
+    : TIERS;
+
   // ── 비용 사전 점검: dry-run(무과금)으로 예상 스캔량 먼저 확인, 상한 초과 시 중단 ──
   let estTotal = 0;
-  for (const t of TIERS) {
+  for (const t of tiers) {
     const { bytes } = await bq(token, buildQuery(t.bucket, t.start, t.end), true);
     estTotal += bytes;
     const gb = bytes / 1e9;
@@ -142,14 +193,10 @@ async function main() {
   }
   console.log(`[mlab] 총 예상 ${(estTotal / 1e9).toFixed(2)}GB/회 → 일1회 가정 월 ~${(estTotal / 1e9 * 30).toFixed(0)}GB (무료 1000GB/월 대비)`);
 
-  // perIsp[ispId][tier] = { thr, rtt, loss, hd, k4, rttFloor, thrPeak }
-  // 기존 캐시에서 시작: mid는 이번 결과로 교체, coarse는 버킷 단위 병합(누적).
-  const perIsp = await loadOldCache();
-  const oldSnaps = Object.values(perIsp).reduce((a, t) => a + Object.keys(t?.coarse?.thr ?? {}).length, 0);
-  console.log(`[mlab] 기존 캐시 coarse 스냅샷 ${oldSnaps}개 로드(누적 병합 기반)`);
+  // mid는 이번 결과로 교체, coarse는 버킷 단위 병합(누적).
   let totalBytes = 0;
 
-  for (const t of TIERS) {
+  for (const t of tiers) {
     const { rows, bytes } = await bq(token, buildQuery(t.bucket, t.start, t.end));
     totalBytes += bytes;
     console.log(`[mlab] ${t.key}: rows=${rows.length} scanned=${(bytes / 1e9).toFixed(2)}GB`);
