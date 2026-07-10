@@ -1,0 +1,44 @@
+# Valve Steam 다운로드 통계 수집 (하루 1회). 공개 엔드포인트라 인증/시크릿 불필요.
+# 국가별 주요 ISP의 평균 다운로드 속도(현재 창 집계만 제공)를 일별 스냅샷으로
+# public/steam_cache.json 에 누적(최근 800일). 비공식 엔드포인트라 실패 시 워크플로가 빨갛게 떠서 바로 알 수 있음.
+name: Collect Steam download stats (daily)
+
+on:
+  schedule:
+    - cron: '23 6 * * *' # 매일 06:23 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: collect-steam
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  steam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Fetch Steam per-ISP download rates → steam_cache.json
+        run: node scripts/collect-steam.ts
+
+      - name: Commit cache
+        run: |
+          git config user.name "quality-bot"
+          git config user.email "quality-bot@users.noreply.github.com"
+          git add public/steam_cache.json
+          if git diff --cached --quiet; then
+            echo "No Steam cache changes."
+          else
+            git commit -m "chore(data): Steam daily cache [skip ci]"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

@@ -79,6 +79,15 @@ async function loadApnicCache(): Promise<ApnicCache | null> {
 }
 const APNIC_METRIC = 'dnssec';
 
+// Steam 캐시(collect-steam.ts): perIsp[ispId][dayMs] = 평균 다운로드 속도(Mbps) 일별 스냅샷.
+const STEAM_CACHE = resolve(__dir, '../public/steam_cache.json');
+type SteamCache = { perIsp: Record<string, Record<string, number>> };
+async function loadSteamCache(): Promise<SteamCache | null> {
+  try { return JSON.parse(await readFile(STEAM_CACHE, 'utf8')) as SteamCache; }
+  catch { return null; }
+}
+const STEAM_METRIC = 'steamDownload';
+
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
 const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
 type NetflixCache = { perIsp: Record<string, { ym: string; speed: number }[]> };
@@ -149,8 +158,9 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   nfHd: { good: 96, spread: 0.03, busy: -0.12 },
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
+  steamDownload: { good: 190, spread: 0.2, busy: -0.2 }, // Steam 평균 다운로드(Mbps): 최번시 하락
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'rpkiValid', 'dnssec', 'nfHd', 'nf4k', 'nfSpeedIndex']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'rpkiValid', 'dnssec', 'nfHd', 'nf4k', 'nfSpeedIndex', 'steamDownload']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)
@@ -394,6 +404,8 @@ async function main() {
   if (iqi) console.log(`[iqi] 캐시 로드됨 (ISP ${Object.keys(iqi.perIsp ?? {}).length}개)`);
   const apnic = await loadApnicCache(); // APNIC DNSSEC 일별 캐시
   if (apnic) console.log(`[apnic] 캐시 로드됨 (ISP ${Object.keys(apnic.perIsp ?? {}).length}개)`);
+  const steam = await loadSteamCache(); // Steam 다운로드 속도 일별 캐시
+  if (steam) console.log(`[steam] 캐시 로드됨 (ISP ${Object.keys(steam.perIsp ?? {}).length}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -418,6 +430,7 @@ async function main() {
         (MLAB_FIELD[metric.id] != null && !!mlab) ||
         (SPEED_FIELD[metric.id] != null && !!speed) ||
         (metric.id === APNIC_METRIC && !!apnic) ||
+        (metric.id === STEAM_METRIC && !!steam) ||
         (metric.id === 'nfSpeedIndex' && !!netflix);
       const entry = {} as Record<TierKey, TierBlock>;
       for (const g of TIER_GEN) {
@@ -445,6 +458,8 @@ async function main() {
           const iqDailyReal = iqDailyField ? iqi?.perIsp?.[isp.id]?.[dayKey]?.[iqDailyField] : undefined;
           // APNIC DNSSEC: 일별 값 + 실표본수(n).
           const apnicReal = metric.id === APNIC_METRIC ? apnic?.perIsp?.[isp.id]?.[dayKey] : undefined;
+          // Steam 다운로드 속도: 일별 스냅샷 — Speed Test처럼 그 날의 값을 전 티어에 사용.
+          const steamReal = metric.id === STEAM_METRIC ? steam?.perIsp?.[isp.id]?.[dayKey] : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
@@ -457,6 +472,9 @@ async function main() {
           } else if (apnicReal && Number.isFinite(apnicReal.dv)) {
             const clamped = Math.min(Math.max(apnicReal.dv, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(apnicReal.n); k.push(apnicReal.n); live++; liveMetricSet.add(metric.id); // 실표본수 제공
+          } else if (steamReal != null && Number.isFinite(steamReal)) {
+            const clamped = Math.min(Math.max(steamReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기
           } else if (spReal != null && Number.isFinite(spReal)) {
             const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기

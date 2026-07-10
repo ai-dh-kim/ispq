@@ -44,8 +44,8 @@ export const SOURCES: Record<string, SourceDef> = {
   // Speed Test는 같은 Cloudflare지만 측정 방식이 다름(실트래픽 수동측정 vs 사용자 자발 실행 능동측정) → 별도 출처 탭.
   cfspeed: { id: 'cfspeed', label: 'Cloudflare Speed Test' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
-  // 단일 지표 출처들을 묶은 탭: Netflix Speed Index + APNIC DNSSEC (2026-07-08 netflix 탭에서 개편).
-  etc: { id: 'etc', label: '기타 (Netflix · APNIC)' },
+  // 단일 지표 출처들을 묶은 탭: Netflix Speed Index + APNIC DNSSEC + Steam (2026-07-08 netflix 탭에서 개편).
+  etc: { id: 'etc', label: '기타 (Netflix · APNIC · Steam)' },
 };
 
 // Netflix 스트리밍 품질 등급(rating_grade) 임계값.
@@ -131,6 +131,11 @@ export const METRICS: MetricDef[] = [
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
   { id: 'nfSpeedIndex', name: 'Netflix ISP Speed Index (프라임타임 평균)', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
+  // Steam 다운로드 속도: Valve가 공개하는 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 Mbps(실제 게임 다운로드 트래픽).
+  // 엔드포인트가 현재 창 집계만 제공 → collect-steam.ts가 매일 스냅샷 누적(수집 시작 2026-07-10 이후 이력만 존재).
+  { id: 'steamDownload', name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+    cite: { grade: 'A', basis: 'Valve Steam 다운로드 통계: 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 속도(실제 게임 다운로드 트래픽) 공개값', url: 'https://store.steampowered.com/stats/content/',
+      note: '※ 전 세계 Steam 이용자의 실제 게임 다운로드에서 집계한 평균 속도로, 대용량 CDN 전송 성능을 보여줍니다(Netflix Speed Index의 게임판 격). 통신사 내 캐시 서버 유무·이용자 회선 구성에 따라 달라져 ISP 간 상대·추세 비교용이며, 가입 상품 속도가 아닙니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
   // DNSSEC 검증률: 이 통신사 이용자 중 DNS 응답 위조를 검증(DNSSEC)하는 리졸버 사용 비율. APNIC(아태 IP주소 관리기구) 실측.
   { id: 'dnssec', name: 'DNSSEC 검증률', source: 'etc', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true,
     cite: { grade: 'A', basis: 'APNIC Labs(아시아·태평양 IP주소 관리기구): ASN별 DNSSEC 검증 사용자 비율 실측(구글 광고망 대규모 표본, 일별)', url: 'https://stats.labs.apnic.net/dnssec',
