@@ -211,9 +211,9 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
           const grade = gradeFor(metric, pt.y);
           const gradeStr = grade ? ` · ${grade}` : '';
           const valStr = pt.y == null ? '–' : `${pt.y} ${metric.unit}`;
-          // 표본 수 미상(실측 percentile 데이터) → 카운트 대신 안내문.
+          // 표본 수 미상(실측 percentile 데이터) → 차트 상단 공지(noSamples)에서 일괄 안내하므로 툴팁엔 생략.
           const sub = (m == null || m.total == null)
-            ? `<div class="qtt-sub">${T.liveNote}</div>`
+            ? ''
             : `<div class="qtt-sub">${T.tooltipTotal} ${m.total} · ${T.tooltipTrimmed} ${m.trimmed} · ${T.tooltipRetained} ${m.retained != null ? (m.retained * 100).toFixed(1) : '–'}% ${m.low ? `<span class="qtt-low-inline">${T.lowSampleWarn}</span>` : ''}</div>`;
           return `<div class="qtt-series">
             <div class="qtt-row">

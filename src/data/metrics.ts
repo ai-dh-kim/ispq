@@ -36,6 +36,9 @@ export interface MetricDef {
   //  (1) 차트를 항상 coarse(1일 버킷)로 표시  (2) X축을 마지막 실데이터에서 멈춤  (3) 일별 수집 공지 표시.
   dailyCadence?: boolean;
   pctFull?: boolean; // 0~100% 완료율(가능률 등) — Y축을 0~100 고정(100% 초과 불가).
+  // 출처가 표본 수(n)를 공개하지 않는 지표(IQI percentile·Speed Test 집계 등).
+  // 툴팁에 ISP마다 "실측값 (표본 수 미제공)"을 반복하는 대신 차트 상단 공지에 한 번만 안내(2026-07-10).
+  noSamples?: boolean;
   cite: MetricCite; // 근거(등급/출처) — 모든 지표 필수(형평성). 차트 하단에 표시.
 }
 
@@ -59,50 +62,50 @@ export const NF_GRADES: { min: number; label: string }[] = [
 
 export const METRICS: MetricDef[] = [
   // --- Cloudflare Radar ---
-  { id: 'latency', name: '지연시간 (RTT)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
+  { id: 'latency', name: '지연시간 (RTT)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 }, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 idle 지연(RTT) 실측', url: 'https://radar.cloudflare.com/quality',
       note: '※ 데이터가 서버까지 갔다 오는 왕복 시간입니다. 낮을수록 웹 클릭 반응·게임·화상회의가 빠릿해집니다. 회선에 부하가 없는 유휴(idle) 상태 기준의 중앙값이라 "그 통신사 망의 기본 지연"에 가깝고, 이용자 지역 구성에 따라 달라지므로 ISP 간 상대·추세 비교용입니다.' } },
   // DNS 응답시간: ISP DNS 해석 속도. Cloudflare IQI가 ASN별로 시계열 제공(낮을수록 좋음). RTT 바로 아래에 배치.
-  { id: 'dnsResponse', name: 'DNS 응답시간', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
+  { id: 'dnsResponse', name: 'DNS 응답시간', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 DNS 응답시간(중앙값) 실측', url: 'https://radar.cloudflare.com/quality',
       note: '※ 주소창에 사이트 이름을 치면 그 이름을 실제 주소(IP)로 바꿔주는 조회에 걸리는 시간입니다. 모든 사이트 접속의 첫 단계라, 낮을수록 "첫 화면이 뜨기 시작하는" 체감이 빨라집니다. 이 통신사 이용자들의 DNS 조회 응답시간 중앙값(실측)입니다.' } },
-  { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
+  { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality',
       note: '※ Cloudflare가 실측한 다운로드 속도의 중앙값(체감 속도)입니다. 가입 상품의 회선 용량(예: 1G)이 아니며, 측정 환경·서버 영향으로 표기 속도보다 낮게 나옵니다. ISP 간 상대·추세 비교용입니다.' } },
   // 보장 처리량(하위 25%): Cloudflare가 ASN별 다운로드 25퍼센타일을 직접 공개. "최악 체감 속도".
-  { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
+  { id: 'p25Throughput', name: '보장 처리량 (하위 25%)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 25퍼센타일 실측 공개값', url: 'https://radar.cloudflare.com/quality',
       note: '※ 다운로드 속도 하위 25%(최악 체감 구간)의 측정 중앙값입니다. 가입 회선 용량이 아닌 체감 속도이며, ISP 간 상대 비교용입니다.' } },
   // IPv6 채택률: ISP 망 현대화 수준(높을수록 최신). Cloudflare가 ASN별 IPv6 트래픽 비율을 시계열로 공개.
-  { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 },
+  { id: 'ipv6', name: 'IPv6 채택률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar HTTP: ASN별 IPv6 트래픽 비율 실측(망 현대화 지표)', url: 'https://developers.cloudflare.com/radar/investigate/http-requests/',
       note: '※ Cloudflare HTTP 트래픽 중 IPv6 비율(실측)입니다. 한국 유선망은 IPv6 도입률이 낮아 일부 ISP(예: KT·SK브로드밴드)는 0%에 가깝게 나올 수 있으며, 이는 측정값이지 오류가 아닙니다.' } },
   // RPKI 라우팅 보안: ISP가 광고하는 BGP 경로 중 암호학적으로 검증(RPKI valid)되는 비율 — 경로 하이재킹 방어 수준.
   // API가 현재 상태만 제공 → collect-iqi.ts가 매일 스냅샷을 누적(수집 시작 2026-07-08 이후 이력만 존재).
-  { id: 'rpkiValid', name: 'RPKI 라우팅 보안 적용률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true,
+  { id: 'rpkiValid', name: 'RPKI 라우팅 보안 적용률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Radar 라우팅: ASN별 BGP 경로 중 RPKI 유효(valid) 비율 — 공개 BGP 데이터 기반, 2시간 주기 갱신', url: 'https://radar.cloudflare.com/routing',
       note: '※ 경로 위·변조(BGP 하이재킹)에 대한 방어 수준입니다. 높을수록 이 통신사가 인터넷에 광고하는 경로가 암호학적으로 검증됩니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
 
   // --- Cloudflare Speed Test (speed.cloudflare.com) ---
   // 사용자가 자발적으로 실행한 스피드테스트의 ASN별 일별 집계(collect-speedtest.ts 캐시).
   // 전 지표 dailyCadence(하루 1스냅샷·coarse 고정). 공통 한계: 측정자 자기선택·WiFi/단말 영향.
-  { id: 'downloadBandwidth', name: '다운로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+  { id: 'downloadBandwidth', name: '다운로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 다운로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ Cloudflare Radar 탭의 대역폭(실트래픽 기반 IQI)과 측정 방식이 다른 독립 실측이라 값이 다를 수 있으며, 상호 교차검증용입니다. 가입 상품 속도가 아닌 체감 속도입니다.' } },
   // 업로드: M-Lab 업로드는 BigQuery 스캔 비용 ~2배라 보류(§8) → Speed Test로 무비용 확보.
-  { id: 'uploadBandwidth', name: '업로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+  { id: 'uploadBandwidth', name: '업로드 속도', source: 'cfspeed', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test(speed.cloudflare.com): ASN별 업로드 속도 실측의 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ 사용자가 자발적으로 실행한 스피드테스트 집계라 측정자 자기선택·WiFi/단말 영향이 있습니다. 가입 상품 속도가 아닌 체감 업로드 속도이며, ISP 간 상대·추세 비교용입니다.' } },
   // 부하 시 지연(버퍼블로트): 다운/업로드 진행 중 측정한 지연. 유휴 RTT와의 차이가 클수록 동시사용 체감 악화.
-  { id: 'loadedLatency', name: '부하 시 지연 (버퍼블로트)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
+  { id: 'loadedLatency', name: '부하 시 지연 (버퍼블로트)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 전송(다운/업로드) 진행 중 측정한 지연(loaded latency)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ 회선이 가득 찼을 때의 지연입니다. 유휴 지연(RTT)보다 얼마나 커지는지가 핵심(버퍼블로트) — 값이 클수록 대용량 전송 중 화상회의·게임이 끊기는 체감이 나빠집니다.' } },
   // 지터: 지연시간의 변동폭. 유휴 상태 측정(일반 스피드테스트 표기와 동일 기준). 부하 중 지터(jl)도 캐시에 수집 중.
-  { id: 'jitter', name: '지터 (유휴)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true,
+  { id: 'jitter', name: '지터 (유휴)', source: 'cfspeed', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 유휴 상태 지연 변동(지터)의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ 지연시간이 얼마나 출렁이는지(변동폭)입니다. 낮을수록 화상회의·게임·실시간 스트리밍이 안정적입니다.' } },
   // 패킷 손실률: API 원값이 이미 %단위(실데이터 분포로 검증: 0~0.2% 수준). M-Lab lossRate와 독립 측정이라 교차검증 가능.
-  { id: 'packetLoss', name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true,
+  { id: 'packetLoss', name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 패킷 손실률의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ M-Lab 손실률(TCP 재전송 기반)과 측정 방식이 다른 독립 실측입니다. 두 값을 함께 보면 교차검증이 됩니다. 0%가 정상이며 0.5%만 넘어도 체감 품질이 떨어집니다.' } },
 
@@ -135,12 +138,12 @@ export const METRICS: MetricDef[] = [
 
   // --- 기타 (단일 지표 출처 묶음: Netflix · APNIC) ---
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
-  { id: 'nfSpeedIndex', name: 'Netflix ISP Speed Index (프라임타임 평균)', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
+  { id: 'nfSpeedIndex', name: 'Netflix ISP Speed Index (프라임타임 평균)', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 }, noSamples: true,
     cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/',
       note: '※ Netflix가 자사 시청 트래픽에서 집계한 프라임타임(저녁 시청 몰림 시간대) 평균 재생 속도입니다. 영상 재생은 화질에 필요한 만큼만 받으므로(비트레이트 상한) 값이 수 Mbps로 작게 나오는 게 정상이며, 회선 최대 속도가 아니라 "가장 붐빌 때 스트리밍 품질을 유지하는 능력"을 ISP끼리 비교하는 지표입니다. 월 1회 갱신됩니다.' } },
   // Steam 다운로드 속도: Valve가 공개하는 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 Mbps(실제 게임 다운로드 트래픽).
   // 엔드포인트가 현재 창 집계만 제공 → collect-steam.ts가 매일 스냅샷 누적(수집 시작 2026-07-10 이후 이력만 존재).
-  { id: 'steamDownload', name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
+  { id: 'steamDownload', name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Valve Steam 다운로드 통계: 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 속도(실제 게임 다운로드 트래픽) 공개값', url: 'https://store.steampowered.com/stats/content/',
       note: '※ 전 세계 Steam 이용자의 실제 게임 다운로드에서 집계한 평균 속도로, 대용량 CDN 전송 성능을 보여줍니다(Netflix Speed Index의 게임판 격). 통신사 내 캐시 서버 유무·이용자 회선 구성에 따라 달라져 ISP 간 상대·추세 비교용이며, 가입 상품 속도가 아닙니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
   // DNSSEC 검증률: 이 통신사 이용자 중 DNS 응답 위조를 검증(DNSSEC)하는 리졸버 사용 비율. APNIC(아태 IP주소 관리기구) 실측.

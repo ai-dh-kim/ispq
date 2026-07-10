@@ -86,7 +86,8 @@ export const T = {
   liveTag: '실데이터',
   simTag: '시뮬',
   liveMixed: '일부 실데이터',
-  liveNote: '실측값 (표본 수 미제공)',
+  // 표본 수 미제공 지표(noSamples) — 툴팁 반복 대신 차트 상단 공지에 한 번만 표시(2026-07-10).
+  noSampleNote: '표본 수는 측정 제공처가 공개하지 않아 실측값만 표시됩니다.',
   // 근거 등급 태그 (제목 옆). A=제공사 직접측정 / B=공개 원측정값의 표준 집계 / C=공개값+스펙 임계 파생
   gradeTag: { A: '직접측정', B: '집계', C: '파생' } as Record<'A' | 'B' | 'C', string>,
   gradeTip: {
