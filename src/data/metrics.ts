@@ -60,10 +60,12 @@ export const NF_GRADES: { min: number; label: string }[] = [
 export const METRICS: MetricDef[] = [
   // --- Cloudflare Radar ---
   { id: 'latency', name: '지연시간 (RTT)', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 idle 지연(RTT) 실측', url: 'https://radar.cloudflare.com/quality' } },
+    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 idle 지연(RTT) 실측', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 데이터가 서버까지 갔다 오는 왕복 시간입니다. 낮을수록 웹 클릭 반응·게임·화상회의가 빠릿해집니다. 회선에 부하가 없는 유휴(idle) 상태 기준의 중앙값이라 "그 통신사 망의 기본 지연"에 가깝고, 이용자 지역 구성에 따라 달라지므로 ISP 간 상대·추세 비교용입니다.' } },
   // DNS 응답시간: ISP DNS 해석 속도. Cloudflare IQI가 ASN별로 시계열 제공(낮을수록 좋음). RTT 바로 아래에 배치.
   { id: 'dnsResponse', name: 'DNS 응답시간', source: 'cloudflare', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 2000 },
-    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 DNS 응답시간(중앙값) 실측', url: 'https://radar.cloudflare.com/quality' } },
+    cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 DNS 응답시간(중앙값) 실측', url: 'https://radar.cloudflare.com/quality',
+      note: '※ 주소창에 사이트 이름을 치면 그 이름을 실제 주소(IP)로 바꿔주는 조회에 걸리는 시간입니다. 모든 사이트 접속의 첫 단계라, 낮을수록 "첫 화면이 뜨기 시작하는" 체감이 빨라집니다. 이 통신사 이용자들의 DNS 조회 응답시간 중앙값(실측)입니다.' } },
   { id: 'bandwidth', name: '대역폭(기준)', source: 'cloudflare', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 },
     cite: { grade: 'A', basis: 'Cloudflare Radar 인터넷 품질(IQI): ASN별 다운로드 속도(중앙값) 실측', url: 'https://radar.cloudflare.com/quality',
       note: '※ Cloudflare가 실측한 다운로드 속도의 중앙값(체감 속도)입니다. 가입 상품의 회선 용량(예: 1G)이 아니며, 측정 환경·서버 영향으로 표기 속도보다 낮게 나옵니다. ISP 간 상대·추세 비교용입니다.' } },
@@ -113,24 +115,29 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'M-Lab ndt7: 다운로드 처리량 상위 10%의 평균(버킷별, BigQuery 분위수 집계)', url: 'https://www.measurementlab.net/tests/ndt/ndt7/',
       note: '※ 단일 TCP→M-Lab 서버 측정의 상위 10% 평균입니다. 경로·단일스트림 상한에 막혀 OLT/백본의 실제 공급 한계를 과소평가할 수 있어 "관측된 피크"로 해석하세요(ISP 간 상대 비교용).' } },
   { id: 'minRtt', name: '최소 RTT', source: 'mlab', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 }, mlabBased: true,
-    cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 최소 RTT(tcpi_min_rtt) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
+    cite: { grade: 'A', basis: 'M-Lab ndt7 TCP_INFO: 최소 RTT(tcpi_min_rtt) 실측', url: 'https://www.measurementlab.net/tests/ndt/ndt7/',
+      note: '※ 측정 중 관측된 가장 짧은 왕복 시간입니다. 혼잡·대기열 영향이 빠진 "회선 자체의 지연"에 가까워, 평균 지연과의 차이가 크면 혼잡 시간대 품질 저하를 의심할 수 있습니다. M-Lab 서버까지의 거리(서버 위치)에 의존하므로 ISP 간 상대 비교용입니다.' } },
   // 지연 하한: 버킷 내 MinRTT 하위 10%의 평균(최상 조건의 '지연 바닥'). 백본/물리 경로 품질 프록시.
   { id: 'latencyFloor', name: '지연 하한 (하위 10%)', source: 'mlab', unit: 'ms', higherIsBetter: false, hard: { min: 0, max: 500 }, mlabBased: true,
     cite: { grade: 'A', basis: 'M-Lab ndt7: MinRTT 하위 10%의 평균(버킷별, BigQuery 분위수 집계)', url: 'https://www.measurementlab.net/tests/ndt/ndt7/',
       note: '※ 최상 조건의 지연 바닥으로, 코어망/백본 경로 품질에 가깝습니다. 단 M-Lab 서버까지의 거리(국가·서버 위치)에 의존합니다.' } },
   { id: 'lossRate', name: '손실률', source: 'mlab', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, mlabBased: true,
-    cite: { grade: 'B', basis: 'M-Lab ndt7 TCP_INFO: 재전송 카운터 기반 손실률 집계', url: 'https://www.measurementlab.net/tests/ndt/ndt7/' } },
+    cite: { grade: 'B', basis: 'M-Lab ndt7 TCP_INFO: 재전송 카운터 기반 손실률 집계', url: 'https://www.measurementlab.net/tests/ndt/ndt7/',
+      note: '※ 보낸 데이터가 도중에 사라져 다시 보내야 했던 비율입니다. 0%에 가까울수록 좋고, 높으면 속도 저하·화상회의 끊김으로 이어집니다. TCP 재전송 카운터 기반 추정(집계 B등급)이라 손실 외 요인이 일부 섞일 수 있어, 정밀 절대값보다 ISP 간 상대·추세 비교에 적합합니다. Speed Test 탭의 패킷 손실률과 교차검증할 수 있습니다.' } },
   // 스트리밍 가능률: M-Lab 처리량이 권장 비트레이트 이상인 측정의 비율(%). Netflix가 측정한 값이 아니라
   // M-Lab 처리량을 Netflix 공식 권장값으로 임계 처리한 '파생(grade C)' 지표 → 출처는 M-Lab.
   { id: 'nfHd', name: 'HD 스트리밍 가능률 (≥5Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, grades: NF_GRADES, mlabBased: true, pctFull: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Full HD 1080p = 5Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306' } },
+    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Full HD 1080p = 5Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306',
+      note: '※ M-Lab 실측 다운로드 속도가 Netflix 공식 권장 5Mbps(Full HD 화질)를 넘긴 측정의 비율입니다. 100%에 가까울수록 "어떤 이용자가 언제 재도 HD는 문제없다"는 뜻입니다. Netflix가 직접 잰 값이 아니라 공개 권장값을 기준으로 파생한 지표(등급 C)입니다.' } },
   { id: 'nf4k', name: '4K 스트리밍 가능률 (≥15Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, mlabBased: true, pctFull: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306' } },
+    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306',
+      note: '※ M-Lab 실측 다운로드 속도가 Netflix 공식 권장 15Mbps(4K UHD 화질)를 넘긴 측정의 비율입니다. 4K는 요구 속도가 높아 HD 가능률보다 ISP·시간대 간 차이가 크게 벌어지므로, 혼잡 시간대 여유를 비교하기 좋습니다. Netflix가 직접 잰 값이 아닌 파생 지표(등급 C)입니다.' } },
 
   // --- 기타 (단일 지표 출처 묶음: Netflix · APNIC) ---
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
   { id: 'nfSpeedIndex', name: 'Netflix ISP Speed Index (프라임타임 평균)', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 6 },
-    cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/' } },
+    cite: { grade: 'A', basis: 'Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 Mbps 공개값(월별)', url: 'https://ispspeedindex.netflix.net/',
+      note: '※ Netflix가 자사 시청 트래픽에서 집계한 프라임타임(저녁 시청 몰림 시간대) 평균 재생 속도입니다. 영상 재생은 화질에 필요한 만큼만 받으므로(비트레이트 상한) 값이 수 Mbps로 작게 나오는 게 정상이며, 회선 최대 속도가 아니라 "가장 붐빌 때 스트리밍 품질을 유지하는 능력"을 ISP끼리 비교하는 지표입니다. 월 1회 갱신됩니다.' } },
   // Steam 다운로드 속도: Valve가 공개하는 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 Mbps(실제 게임 다운로드 트래픽).
   // 엔드포인트가 현재 창 집계만 제공 → collect-steam.ts가 매일 스냅샷 누적(수집 시작 2026-07-10 이후 이력만 존재).
   { id: 'steamDownload', name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true,
