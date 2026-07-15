@@ -10,3 +10,6 @@ mlab-bq/
 *-service-account*.json
 *gserviceaccount*.json
 broadband-quality-dashboard-*.json
+
+# NIA 신선도 감시 마커(collect-nia.ts가 생성, 워크플로 알람용 — 커밋 금지)
+nia_stale.txt

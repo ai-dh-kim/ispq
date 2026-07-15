@@ -10,7 +10,7 @@
 //
 // 실행: node scripts/collect-nia.ts
 
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, unlink } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { request } from 'node:https';
 import { rootCertificates } from 'node:tls';
@@ -77,6 +77,26 @@ async function loadCache(): Promise<Cache['perIsp']> {
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
+// ── 신선도 감시 (2026-07-15) ──
+// NIA 통계는 배치 재계산으로 보이는데, 만약 원본 갱신이 멈추면 우리 캐시엔 같은 값이 계속 쌓인다.
+// 최근 STALE_DAYS일(오늘 포함) 스냅샷이 "전 사업자 × 전 상품 × 전 값"에서 완전히 동일하면
+// 마커(nia_stale.txt)를 남긴다 → 워크플로가 캐시 커밋을 마친 뒤 이 마커를 보고 실패(빨간불 알람).
+// 값이 같아도 캐시 기록·커밋은 정상 진행(공표값 기록은 계속) — 알람만 분리한다.
+const STALE_DAYS = 3;
+const STALE_MARKER = resolve(__dir, '../nia_stale.txt');
+function checkStale(perIsp: Cache['perIsp'], today: number): string | null {
+  const dayKeys = Array.from({ length: STALE_DAYS }, (_, i) => String(today - i * DAY));
+  let compared = 0;
+  for (const days of Object.values(perIsp)) {
+    const snaps = dayKeys.map((k) => days[k]);
+    if (snaps.some((s) => s == null)) continue; // 3일치가 없는 사업자는 판단에서 제외
+    const [a, b, c] = snaps.map((s) => JSON.stringify(s));
+    if (a !== b || a !== c) return null; // 한 사업자라도 값이 변했으면 신선
+    compared++;
+  }
+  return compared > 0 ? `${compared}개 사업자 × ${STALE_DAYS}일 완전 동일` : null;
+}
+
 type NiaRow = { company_id: number; company_desc: string; BAND: number; AVG: number; RATE: number };
 
 async function fetchTier(params: string, direct: 1 | 2): Promise<NiaRow[]> {
@@ -128,6 +148,14 @@ async function main() {
   await writeFile(OUT, JSON.stringify(payload));
   const totalSnaps = Object.values(perIsp).reduce((a, d) => a + Object.keys(d).length, 0);
   console.log(`[nia] cells=${cells} core3사=${core.join(',')} totalSnaps=${totalSnaps} → ${OUT}`);
+
+  const staleMsg = checkStale(perIsp, today);
+  if (staleMsg) {
+    await writeFile(STALE_MARKER, `${new Date().toISOString()} ${staleMsg}`);
+    console.warn(`[nia] ⚠ 신선도 경고: ${staleMsg} — NIA 원본 갱신 중단 의심(워크플로가 알람 처리)`);
+  } else {
+    try { await unlink(STALE_MARKER); } catch { /* 마커 없으면 무시 */ }
+  }
 }
 
 main().catch((err) => { console.error('[nia] fatal:', err); process.exit(1); });

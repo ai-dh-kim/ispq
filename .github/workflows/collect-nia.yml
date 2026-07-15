@@ -42,3 +42,13 @@ jobs:
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
+
+      # 신선도 알람: 최근 3일 스냅샷이 전 사업자·전 값 완전 동일이면 수집기가 nia_stale.txt를 남긴다.
+      # 커밋(위 단계)까지 마친 뒤 여기서 실패 처리 → 워크플로 빨간불 = GitHub 실패 알림(알람).
+      - name: Staleness alarm (3일 연속 동일값)
+        run: |
+          if [ -f nia_stale.txt ]; then
+            echo "::error::NIA 통계가 3일 이상 완전 동일 — 원본 갱신 중단 의심: $(cat nia_stale.txt)"
+            exit 1
+          fi
+          echo "신선도 정상(최근 3일 내 값 변동 있음 또는 이력 3일 미만)."
