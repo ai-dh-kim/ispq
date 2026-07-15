@@ -22,7 +22,8 @@ export const SUMMARY_METRICS: { id: string; short: string }[] = [
   { id: 'uploadBandwidth', short: '업로드' },
   { id: 'loadedLatency', short: '부하지연' },
   { id: 'lossRate', short: '손실률' },
-  { id: 'nfHd', short: 'HD가능' },
+  // nfHd(HD가능)는 2026-07-15 지표 제거로 교체 — 스트리밍 범주 대표는 Netflix 실측 공개값으로.
+  { id: 'nfSpeedIndex', short: 'Netflix' },
 ];
 
 export interface SummaryCell {

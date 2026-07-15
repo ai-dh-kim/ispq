@@ -153,14 +153,9 @@ export const METRICS: MetricDef[] = [
   { id: 'lossRate', name: '손실률', source: 'mlab', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, mlabBased: true,
     cite: { grade: 'B', basis: 'M-Lab ndt7 TCP_INFO: 재전송 카운터 기반 손실률 집계', url: 'https://www.measurementlab.net/tests/ndt/ndt7/',
       note: '※ 보낸 데이터가 도중에 사라져 다시 보내야 했던 비율입니다. 0%에 가까울수록 좋고, 높으면 속도 저하·화상회의 끊김으로 이어집니다. TCP 재전송 카운터 기반 추정(집계 B등급)이라 손실 외 요인이 일부 섞일 수 있어, 정밀 절대값보다 ISP 간 상대·추세 비교에 적합합니다. Speed Test 탭의 패킷 손실률과 교차검증할 수 있습니다.' } },
-  // 스트리밍 가능률: M-Lab 처리량이 권장 비트레이트 이상인 측정의 비율(%). Netflix가 측정한 값이 아니라
-  // M-Lab 처리량을 Netflix 공식 권장값으로 임계 처리한 '파생(grade C)' 지표 → 출처는 M-Lab.
-  { id: 'nfHd', name: 'HD 스트리밍 가능률 (≥5Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, grades: NF_GRADES, mlabBased: true, pctFull: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Full HD 1080p = 5Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306',
-      note: '※ M-Lab 실측 다운로드 속도가 Netflix 공식 권장 5Mbps(Full HD 화질)를 넘긴 측정의 비율입니다. 100%에 가까울수록 "어떤 이용자가 언제 재도 HD는 문제없다"는 뜻입니다. Netflix가 직접 잰 값이 아니라 공개 권장값을 기준으로 파생한 지표(등급 C)입니다.' } },
-  { id: 'nf4k', name: '4K 스트리밍 가능률 (≥15Mbps)', source: 'mlab', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, mlabBased: true, pctFull: true,
-    cite: { grade: 'C', basis: 'M-Lab 처리량 실측 × Netflix 공식 권장(Ultra HD 4K = 15Mbps 이상)의 파생 비율 — Netflix 측정값 아님', url: 'https://help.netflix.com/en/node/306',
-      note: '※ M-Lab 실측 다운로드 속도가 Netflix 공식 권장 15Mbps(4K UHD 화질)를 넘긴 측정의 비율입니다. 4K는 요구 속도가 높아 HD 가능률보다 ISP·시간대 간 차이가 크게 벌어지므로, 혼잡 시간대 여유를 비교하기 좋습니다. Netflix가 직접 잰 값이 아닌 파생 지표(등급 C)입니다.' } },
+  // (제거됨 2026-07-15, 사용자 요청) nfHd 'HD 스트리밍 가능률(≥5Mbps)' · nf4k '4K 스트리밍 가능률(≥15Mbps)':
+  // M-Lab 처리량 × Netflix 권장 임계 파생(grade C). 원천 수집은 계속됨(collect-mlab.ts → mlab_cache.json의 hd/k4 필드,
+  // generate-mock.ts MLAB_FIELD 매핑도 유지) — 재추가하려면 여기 지표 정의 2줄만 복원하면 과거 이력까지 그대로 살아난다.
 
   // --- 기타 (단일 지표 출처 묶음: Netflix · APNIC) ---
   // Netflix ISP Speed Index: 통신사별 프라임타임 평균 재생 처리량(실측 공개값). Netflix가 비트레이트를 캡하므로 값이 작다.
