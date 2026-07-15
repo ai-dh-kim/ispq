@@ -80,7 +80,8 @@ export const NIA_ISPS: NiaIsp[] = [
   { id: 'lghv', name: 'LG헬로비전' },
   { id: 'hcn', name: 'HCN' },
   { id: 'cmb', name: 'CMB' },
-  { id: 'etc', name: '기타 (그 외 사업자)' },
+  // '기타(etc)'는 군소 사업자 묶음 + 분류 노이즈라 화면에서 제외(2026-07-15 사용자 결정).
+  // 수집(collect-nia.ts)은 계속 캐시에 저장 — 재추가 시 여기 한 줄 복원이면 과거 이력까지 표시됨.
 ];
 export const NIA_NAME_BY_ID: Record<string, string> = Object.fromEntries(NIA_ISPS.map((i) => [i.id, i.name]));
 // ISP_GROUPS에 없는 NIA 전용 id(케이블사 등) — generate-mock이 이들에 대해선 NIA 지표만 생성한다.
