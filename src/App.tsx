@@ -116,8 +116,8 @@ export default function App() {
           <select value={sourceId} onChange={(e) => {
             const s = e.target.value;
             setSourceId(s);
-            // Speed Test는 하루 1회 집계 → 기간 90일·집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
-            if (s === 'cfspeed') { setRange('90d'); setView('1day'); }
+            // Speed Test·NIA는 하루 1회 집계 → 기간 90일·집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
+            if (s === 'cfspeed' || s === 'nia') { setRange('90d'); setView('1day'); }
           }}>
             {Object.values(SOURCES).map((src) => (
               <option key={src.id} value={src.id}>{src.label}</option>

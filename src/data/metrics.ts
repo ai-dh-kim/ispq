@@ -46,6 +46,8 @@ export const SOURCES: Record<string, SourceDef> = {
   cloudflare: { id: 'cloudflare', label: 'Cloudflare Radar' },
   // Speed Test는 같은 Cloudflare지만 측정 방식이 다름(실트래픽 수동측정 vs 사용자 자발 실행 능동측정) → 별도 출처 탭.
   cfspeed: { id: 'cfspeed', label: 'Cloudflare Speed Test' },
+  // NIA(한국지능정보사회진흥원, 과기정통부 산하) 인터넷 품질측정 공개 통계 — 정부기관 측정 시스템(2026-07-15 추가).
+  nia: { id: 'nia', label: 'NIA 속도측정 (정부기관)' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
   // 단일 지표 출처들을 묶은 탭: Netflix Speed Index + APNIC DNSSEC + Steam (2026-07-08 netflix 탭에서 개편).
   etc: { id: 'etc', label: '기타 (Netflix · APNIC · Steam)' },
@@ -59,6 +61,10 @@ export const NF_GRADES: { min: number; label: string }[] = [
   { min: 70, label: 'HD 제한적' },
   { min: 0, label: '표준화질(SD)' },
 ];
+
+// NIA 속도측정 지표 공통 해석 주석(8종 동일).
+const NIA_NOTE =
+  '※ 정부 산하기관 NIA가 직접 운영하는 측정 시스템(speed.nia.or.kr)의 사업자별 공개 통계로, 측정통계 화면에는 날씨 아이콘(기상도)으로만 표시되는 값의 원천 수치입니다. 이용자가 자발적으로 측정한 표본(가입 상품은 이용자 신고값)이라 절대값보다 사업자 간 상대·추세 비교에 적합하며, 해당 상품을 파는 사업자만 나타납니다. 국내 전용이라 해외 ISP 비교는 없습니다. 원자료는 월간 집계 현재값만 제공되어 수집 시작(2026-07) 이후부터 일별 이력이 쌓입니다.';
 
 export const METRICS: MetricDef[] = [
   // --- Cloudflare Radar ---
@@ -108,6 +114,26 @@ export const METRICS: MetricDef[] = [
   { id: 'packetLoss', name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true, noSamples: true,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 패킷 손실률의 ASN별 일별 집계', url: 'https://radar.cloudflare.com/quality',
       note: '※ M-Lab 손실률(TCP 재전송 기반)과 측정 방식이 다른 독립 실측입니다. 두 값을 함께 보면 교차검증이 됩니다. 0%가 정상이며 0.5%만 넘어도 체감 품질이 떨어집니다.' } },
+
+  // --- NIA 속도측정 (speed.nia.or.kr, 정부기관) ---
+  // 측정통계 페이지의 데이터 피드(statistic_isp.asp)에서 상품별 사업자 평균을 일별 스냅샷으로 수집(collect-nia.ts).
+  // 국내 전용(해외 ISP 데이터 없음). 상품 4종 × 다운/업 8종 전부 노출 — 필요 없는 것은 나중에 제거(2026-07-15 결정).
+  { id: 'niaDl100', name: '다운로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 100M 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaUl100', name: '업로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 100M 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaDl500', name: '다운로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 500M 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaUl500', name: '업로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 500M 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaDl1g', name: '다운로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 1G 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaUl1g', name: '업로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 1G 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaDl10g', name: '다운로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 10G 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
+  { id: 'niaUl10g', name: '업로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true,
+    cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 10G 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
 
   // --- M-Lab (ndt7) ---
   { id: 'meanThroughput', name: '평균 처리량', source: 'mlab', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, mlabBased: true,

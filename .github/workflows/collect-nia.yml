@@ -1,0 +1,44 @@
+# NIA 인터넷 품질측정 사업자별 통계 수집 (하루 1회). 공개 통계 페이지의 데이터 피드라 인증/시크릿 불필요.
+# 상품 4종(100M/500M/1G/10G) × 다운/업의 사업자별 평균(월간 집계 현재값)을 일별 스냅샷으로
+# public/nia_cache.json 에 누적(최근 800일). 비공식 피드라 형식 변경 시 워크플로가 빨갛게 떠서 바로 감지.
+name: Collect NIA speed stats (daily)
+
+on:
+  schedule:
+    - cron: '41 6 * * *' # 매일 06:41 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: collect-nia
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  nia:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Fetch NIA per-ISP speed stats → nia_cache.json
+        run: node scripts/collect-nia.ts
+
+      - name: Commit cache
+        run: |
+          git config user.name "quality-bot"
+          git config user.email "quality-bot@users.noreply.github.com"
+          git add public/nia_cache.json
+          if git diff --cached --quiet; then
+            echo "No NIA cache changes."
+          else
+            git commit -m "chore(data): NIA daily cache [skip ci]"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

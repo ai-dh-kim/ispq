@@ -88,6 +88,23 @@ async function loadSteamCache(): Promise<SteamCache | null> {
 }
 const STEAM_METRIC = 'steamDownload';
 
+// NIA 캐시(collect-nia.ts): perIsp[ispId][dayMs][t100|t500|t1g|t10g] = { d, u, rd, ru } 일별 스냅샷.
+const NIA_CACHE = resolve(__dir, '../public/nia_cache.json');
+type NiaTierSnap = { d?: number; u?: number; rd?: number; ru?: number };
+type NiaDaySnap = Partial<Record<'t100' | 't500' | 't1g' | 't10g', NiaTierSnap>>;
+type NiaCache = { perIsp: Record<string, Record<string, NiaDaySnap>> };
+async function loadNiaCache(): Promise<NiaCache | null> {
+  try { return JSON.parse(await readFile(NIA_CACHE, 'utf8')) as NiaCache; }
+  catch { return null; }
+}
+// NIA 지표 id → (티어, 방향) — RATE(rd/ru)는 캐시에만 저장(지표화 시 여기만 확장).
+const NIA_FIELD: Record<string, { tier: keyof NiaDaySnap; dir: 'd' | 'u' }> = {
+  niaDl100: { tier: 't100', dir: 'd' }, niaUl100: { tier: 't100', dir: 'u' },
+  niaDl500: { tier: 't500', dir: 'd' }, niaUl500: { tier: 't500', dir: 'u' },
+  niaDl1g: { tier: 't1g', dir: 'd' }, niaUl1g: { tier: 't1g', dir: 'u' },
+  niaDl10g: { tier: 't10g', dir: 'd' }, niaUl10g: { tier: 't10g', dir: 'u' },
+};
+
 // Netflix 캐시(collect-netflix.ts): perIsp[ispId] = [{ym:'YYYYMM', speed}] (월별). nfSpeedIndex에 사용.
 const NF_CACHE = resolve(__dir, '../public/netflix_cache.json');
 type NetflixCache = { perIsp: Record<string, { ym: string; speed: number }[]> };
@@ -159,8 +176,14 @@ const BASE: Record<string, { good: number; spread: number; busy: number }> = {
   nf4k: { good: 70, spread: 0.06, busy: -0.3 },
   nfSpeedIndex: { good: 3.6, spread: 0.08, busy: -0.15 },
   steamDownload: { good: 190, spread: 0.2, busy: -0.2 }, // Steam 평균 다운로드(Mbps): 최번시 하락
+  // NIA 속도측정(상품별 평균): 시뮬 폴백은 상품 공칭 근처
+  niaDl100: { good: 80, spread: 0.1, busy: -0.1 }, niaUl100: { good: 80, spread: 0.1, busy: -0.1 },
+  niaDl500: { good: 460, spread: 0.1, busy: -0.1 }, niaUl500: { good: 460, spread: 0.1, busy: -0.1 },
+  niaDl1g: { good: 800, spread: 0.1, busy: -0.1 }, niaUl1g: { good: 800, spread: 0.1, busy: -0.1 },
+  niaDl10g: { good: 5000, spread: 0.1, busy: -0.1 }, niaUl10g: { good: 5000, spread: 0.1, busy: -0.1 },
 };
-const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'rpkiValid', 'dnssec', 'nfHd', 'nf4k', 'nfSpeedIndex', 'steamDownload']);
+const HIGHER_IS_BETTER = new Set(['bandwidth', 'downloadBandwidth', 'uploadBandwidth', 'p25Throughput', 'meanThroughput', 'peakCapacity', 'ipv6', 'rpkiValid', 'dnssec', 'nfHd', 'nf4k', 'nfSpeedIndex', 'steamDownload',
+  'niaDl100', 'niaUl100', 'niaDl500', 'niaUl500', 'niaDl1g', 'niaUl1g', 'niaDl10g', 'niaUl10g']);
 // 0~100%로 상한이 있는 지표 (생성 시 100 초과 클리핑).
 const PCT_CAPPED = new Set(
   METRICS.filter((m) => m.unit === '%').map((m) => m.id)
@@ -406,6 +429,8 @@ async function main() {
   if (apnic) console.log(`[apnic] 캐시 로드됨 (ISP ${Object.keys(apnic.perIsp ?? {}).length}개)`);
   const steam = await loadSteamCache(); // Steam 다운로드 속도 일별 캐시
   if (steam) console.log(`[steam] 캐시 로드됨 (ISP ${Object.keys(steam.perIsp ?? {}).length}개)`);
+  const nia = await loadNiaCache(); // NIA 사업자별 속도 일별 캐시
+  if (nia) console.log(`[nia] 캐시 로드됨 (사업자 ${Object.keys(nia.perIsp ?? {}).length}개)`);
   let live = 0;
   const liveMetricSet = new Set<string>(); // 실데이터가 하나라도 들어간 지표 id
 
@@ -431,6 +456,7 @@ async function main() {
         (SPEED_FIELD[metric.id] != null && !!speed) ||
         (metric.id === APNIC_METRIC && !!apnic) ||
         (metric.id === STEAM_METRIC && !!steam) ||
+        (NIA_FIELD[metric.id] != null && !!nia) ||
         (metric.id === 'nfSpeedIndex' && !!netflix);
       const entry = {} as Record<TierKey, TierBlock>;
       for (const g of TIER_GEN) {
@@ -460,6 +486,9 @@ async function main() {
           const apnicReal = metric.id === APNIC_METRIC ? apnic?.perIsp?.[isp.id]?.[dayKey] : undefined;
           // Steam 다운로드 속도: 일별 스냅샷 — Speed Test처럼 그 날의 값을 전 티어에 사용.
           const steamReal = metric.id === STEAM_METRIC ? steam?.perIsp?.[isp.id]?.[dayKey] : undefined;
+          // NIA 사업자별 속도: 일별 스냅샷(상품 티어·방향은 NIA_FIELD 매핑).
+          const niaField = NIA_FIELD[metric.id];
+          const niaReal = niaField ? nia?.perIsp?.[isp.id]?.[dayKey]?.[niaField.tier]?.[niaField.dir] : undefined;
           if (cfReal != null && Number.isFinite(cfReal)) {
             const clamped = Math.min(Math.max(cfReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id);
@@ -475,6 +504,9 @@ async function main() {
           } else if (steamReal != null && Number.isFinite(steamReal)) {
             const clamped = Math.min(Math.max(steamReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기
+          } else if (niaReal != null && Number.isFinite(niaReal)) {
+            const clamped = Math.min(Math.max(niaReal, metric.hard.min), metric.hard.max);
+            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공
           } else if (spReal != null && Number.isFinite(spReal)) {
             const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기
