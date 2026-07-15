@@ -27,6 +27,12 @@ const BRAND_COLORS: Record<string, string> = {
   lgu: '#E5007A',         // LG U+ 통합 (229,0,122)
   'lgu-3786': '#E5007A',  // LG U+ AS3786
   'lgu-17858': '#ff66ab', // LG U+ AS17858 (구분 위해 약간 밝게)
+  // NIA 속도측정 전용 케이블사(3사 브랜드색과 겹치지 않는 색으로 고정)
+  dlive: '#1E88E5',       // 딜라이브 (파랑)
+  lghv: '#8E24AA',        // LG헬로비전 (보라)
+  hcn: '#F57C00',         // HCN (주황)
+  cmb: '#2E7D32',         // CMB (초록)
+  etc: '#9E9E9E',         // 기타 (회색)
 };
 
 export function colorForIsp(index: number, ispId?: string): string {

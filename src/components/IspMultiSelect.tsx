@@ -2,8 +2,8 @@
 // 단일 접이식 패널: 한국 통신사 상단 고정, 해외는 국가별 그룹(접기 가능),
 // 패널 최대 80vh + 내부 스크롤.
 
-import { useEffect, useRef, useState } from 'react';
-import { ISP_GROUPS, type Isp } from '../data/isps.ts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ISP_GROUPS, NIA_ISPS, type Isp, type IspGroup } from '../data/isps.ts';
 import { colorForIsp } from '../theme.ts';
 import { T } from '../config.ts';
 
@@ -11,9 +11,19 @@ interface Props {
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
   colorIndex: (ispId: string) => number;
+  // NIA 탭 전용 모드: 해외 그룹 대신 국내 사업자(케이블 포함) 단일 목록을 표시(2026-07-15).
+  niaMode?: boolean;
 }
 
-export default function IspMultiSelect({ selected, onChange, colorIndex }: Props) {
+// NIA 모드에서 쓰는 가상 그룹: NIA 통계에 존재하는 국내 사업자 전부(ASN 없음, LG U+는 통합 단일 선택).
+const NIA_GROUP: IspGroup = {
+  id: 'KR_NIA',
+  label: '한국 사업자 (NIA 속도측정)',
+  pinned: true,
+  isps: NIA_ISPS.map((n) => ({ id: n.id, name: n.name, asns: [] })),
+};
+
+export default function IspMultiSelect({ selected, onChange, colorIndex, niaMode }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -33,13 +43,15 @@ export default function IspMultiSelect({ selected, onChange, colorIndex }: Props
     onChange(next);
   };
 
+  const groups = useMemo(() => (niaMode ? [NIA_GROUP] : ISP_GROUPS), [niaMode]);
+
   const q = query.trim().toLowerCase();
   const matches = (isp: Isp) =>
     !q || isp.name.toLowerCase().includes(q) || isp.asns.join(' ').toLowerCase().includes(q);
 
   const selectShown = () => {
     const all = new Set(selected);
-    ISP_GROUPS.forEach((g) => g.isps.forEach((i) => {
+    groups.forEach((g) => g.isps.forEach((i) => {
       if (i.hidden || !matches(i)) return;
       if (i.asnUnits) i.asnUnits.forEach((u) => all.add(u.id));
       else all.add(i.id);
@@ -65,7 +77,7 @@ export default function IspMultiSelect({ selected, onChange, colorIndex }: Props
             autoFocus
           />
 
-          {ISP_GROUPS.map((group) => {
+          {groups.map((group) => {
             const visible = group.isps.filter((i) => !i.hidden && matches(i));
             if (visible.length === 0) return null;
             const isCollapsed = !group.pinned && collapsed[group.id] && !q;

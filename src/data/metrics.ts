@@ -47,7 +47,7 @@ export const SOURCES: Record<string, SourceDef> = {
   // Speed Test는 같은 Cloudflare지만 측정 방식이 다름(실트래픽 수동측정 vs 사용자 자발 실행 능동측정) → 별도 출처 탭.
   cfspeed: { id: 'cfspeed', label: 'Cloudflare Speed Test' },
   // NIA(한국지능정보사회진흥원, 과기정통부 산하) 인터넷 품질측정 공개 통계 — 정부기관 측정 시스템(2026-07-15 추가).
-  nia: { id: 'nia', label: 'NIA 속도측정 (정부기관)' },
+  nia: { id: 'nia', label: 'NIA 속도측정' },
   mlab: { id: 'mlab', label: 'M-Lab (ndt7 / BigQuery)' },
   // 단일 지표 출처들을 묶은 탭: Netflix Speed Index + APNIC DNSSEC + Steam (2026-07-08 netflix 탭에서 개편).
   etc: { id: 'etc', label: '기타 (Netflix · APNIC · Steam)' },
@@ -64,7 +64,7 @@ export const NF_GRADES: { min: number; label: string }[] = [
 
 // NIA 속도측정 지표 공통 해석 주석(8종 동일).
 const NIA_NOTE =
-  '※ 정부 산하기관 NIA가 직접 운영하는 측정 시스템(speed.nia.or.kr)의 사업자별 공개 통계로, 측정통계 화면에는 날씨 아이콘(기상도)으로만 표시되는 값의 원천 수치입니다. 이용자가 자발적으로 측정한 표본(가입 상품은 이용자 신고값)이라 절대값보다 사업자 간 상대·추세 비교에 적합하며, 해당 상품을 파는 사업자만 나타납니다. 국내 전용이라 해외 ISP 비교는 없습니다. 원자료는 월간 집계 현재값만 제공되어 수집 시작(2026-07) 이후부터 일별 이력이 쌓입니다.';
+  '※ 정부 산하기관 NIA가 직접 운영하는 측정 시스템(speed.nia.or.kr)의 사업자별 공개 통계로, 측정통계 화면에는 날씨 아이콘(기상도)으로만 표시되는 값의 원천 수치입니다. 이용자가 자발적으로 측정한 표본(가입 상품은 이용자 신고값)이라 절대값보다 사업자 간 상대·추세 비교에 적합하며, 해당 상품을 파는 사업자만 나타납니다. 국내 전용이라 해외 ISP 비교는 없는 대신, 케이블 사업자(딜라이브·LG헬로비전·HCN·CMB)까지 비교할 수 있습니다. 원자료는 월간 집계 현재값만 제공되어 수집 시작(2026-07) 이후부터 일별 이력이 쌓입니다.';
 
 export const METRICS: MetricDef[] = [
   // --- Cloudflare Radar ---

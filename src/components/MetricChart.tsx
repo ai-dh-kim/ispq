@@ -9,7 +9,7 @@ import type { ApexOptions } from 'apexcharts';
 import { aggregateSeries } from '../lib/aggregate.ts';
 import { getTierPoints } from '../data/quality.ts';
 import { colorForIsp } from '../theme.ts';
-import { ISP_BY_ID, COMBINE_GROUPS } from '../data/isps.ts';
+import { ISP_BY_ID, COMBINE_GROUPS, NIA_NAME_BY_ID } from '../data/isps.ts';
 import { METRIC_BY_ID, gradeFor } from '../data/metrics.ts';
 import { VIEWS, RANGES, T, type ViewKey, type RangeKey } from '../config.ts';
 import type { QualityData } from '../types.ts';
@@ -125,7 +125,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       const pts = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
       const color = colorForIsp(colorIndex(ispId), ispId);
       series.push({
-        name: ISP_BY_ID[ispId]?.name || ispId,
+        name: ISP_BY_ID[ispId]?.name || NIA_NAME_BY_ID[ispId] || ispId, // NIA 전용 케이블사는 별도 이름 맵
         data: pts.map((p) => ({
           x: p.t,
           y: p.v == null ? null : Math.round(p.v * 100) / 100,

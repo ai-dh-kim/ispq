@@ -67,6 +67,25 @@ export const ISP_BY_ID: Record<string, FlatIsp> = Object.fromEntries(
   ALL_ISPS.map((i) => [i.id, i])
 );
 
+// --- NIA 속도측정 전용 국내 사업자 목록 (2026-07-15) ---
+// NIA 통계(collect-nia.ts)는 ASN이 아닌 사업자 단위라 케이블사가 포함된다. 전역 ISP_GROUPS(ASN 기반,
+// 모든 탭 공용 선택 목록)와 분리해 NIA 탭에서만 선택/표시한다. kt/skb/lgu는 기존 id 재사용(색·이름 동일),
+// LG U+는 NIA가 브랜드 단위라 ASN unit 없이 통합(lgu) 하나로 선택한다. id는 nia_cache.json 키와 일치.
+export interface NiaIsp { id: string; name: string }
+export const NIA_ISPS: NiaIsp[] = [
+  { id: 'kt', name: 'KT' },
+  { id: 'skb', name: 'SK 브로드밴드' },
+  { id: 'lgu', name: 'LG U+' },
+  { id: 'dlive', name: "딜라이브 (D'LIVE)" },
+  { id: 'lghv', name: 'LG헬로비전' },
+  { id: 'hcn', name: 'HCN' },
+  { id: 'cmb', name: 'CMB' },
+  { id: 'etc', name: '기타 (그 외 사업자)' },
+];
+export const NIA_NAME_BY_ID: Record<string, string> = Object.fromEntries(NIA_ISPS.map((i) => [i.id, i.name]));
+// ISP_GROUPS에 없는 NIA 전용 id(케이블사 등) — generate-mock이 이들에 대해선 NIA 지표만 생성한다.
+export const NIA_EXTRA_IDS: string[] = NIA_ISPS.map((i) => i.id).filter((id) => !ISP_BY_ID[id]);
+
 // 합산(통합) 매핑: member ASN unit이 "모두" 선택되면 차트에서 combo 하나(합산값)로 합쳐 표시.
 export const COMBINE_GROUPS: Record<string, string[]> = {};
 for (const g of ISP_GROUPS) for (const isp of g.isps) if (isp.asnUnits) COMBINE_GROUPS[isp.id] = isp.asnUnits.map((u) => u.id);

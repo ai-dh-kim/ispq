@@ -12,7 +12,7 @@ import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ALL_ISPS } from '../src/data/isps.ts';
+import { ALL_ISPS, NIA_EXTRA_IDS, type FlatIsp } from '../src/data/isps.ts';
 import { METRICS, METRIC_BY_ID } from '../src/data/metrics.ts';
 import { trimmedStats } from '../src/lib/stats.ts';
 import { TIER_BASE_MIN } from '../src/config.ts';
@@ -444,9 +444,19 @@ async function main() {
   const series: QualityData['series'] = {};
   let points = 0;
 
-  for (const isp of ALL_ISPS) {
+  // NIA 전용 국내 사업자(케이블사 등): ASN이 없어 다른 수집기와 무관 — NIA 지표만 생성(niaOnly).
+  type GenIsp = FlatIsp & { niaOnly?: boolean };
+  const genIsps: GenIsp[] = [
+    ...ALL_ISPS,
+    ...NIA_EXTRA_IDS.map((id): GenIsp => ({
+      id, name: id, asns: [], groupId: 'KR', groupLabel: '한국', pinned: true, hidden: true, niaOnly: true,
+    })),
+  ];
+
+  for (const isp of genIsps) {
     series[isp.id] = {};
     for (const metric of METRICS) {
+      if (isp.niaOnly && NIA_FIELD[metric.id] == null) continue; // 케이블사는 NIA 지표만
       // 이 지표가 이번 실행에서 "실데이터 연동" 상태인지(=실어댑터가 켜짐). 그러면 데이터 없는 구간은
       // 시뮬로 채우지 않고 빈칸으로 둔다(가짜 값으로 인한 해석 혼선 방지). 비연동이면 기존대로 시뮬.
       const liveConnected =
@@ -542,7 +552,7 @@ async function main() {
     mode: live > 0 ? 'live' : 'sim', // 실데이터 셀이 하나라도 있으면 live(혼합)
     lang: 'ko',
     tiers,
-    isps: ALL_ISPS.map((i) => i.id),
+    isps: genIsps.map((i) => i.id),
     metrics: METRICS.map((m) => m.id),
     liveMetrics: [...liveMetricSet], // 실데이터가 들어간 지표(프론트 '실시간' 태그용)
     series,

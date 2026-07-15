@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { applyTheme, loadTheme } from './theme.ts';
 import { useQualityData } from './data/quality.ts';
 import { METRICS, METRIC_BY_ID, DEFAULT_METRIC, SOURCES } from './data/metrics.ts';
-import { ALL_ISPS } from './data/isps.ts';
+import { ALL_ISPS, NIA_ISPS } from './data/isps.ts';
 import {
   RANGES, VIEWS, TIER_VIEWS, T,
   type RangeKey, type ViewKey,
@@ -28,6 +28,8 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(ALL_ISPS.filter((i) => i.pinned && !i.hidden).map((i) => i.id))
   );
+  // NIA 탭 전용 선택(케이블사 포함, 기본 전체 선택) — 전역 선택과 분리해 다른 탭에 영향 없음.
+  const [selectedNia, setSelectedNia] = useState<Set<string>>(() => new Set(NIA_ISPS.map((i) => i.id)));
   const [sourceId, setSourceId] = useState<string>(DEFAULT_SOURCE);
   const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
   const [view, setView] = useState<ViewKey>(DEFAULT_VIEW);
@@ -102,7 +104,11 @@ export default function App() {
     return end - RANGES[range].ms;
   }, [data, tier, range]);
 
-  const selectedList = useMemo(() => [...selected], [selected]);
+  const niaTab = sourceId === 'nia';
+  const selectedList = useMemo(
+    () => (niaTab ? [...selectedNia] : [...selected]),
+    [niaTab, selected, selectedNia],
+  );
   const mode = data?.mode;
   const effectiveView: ViewKey = allowedViews.includes(view) ? view : allowedViews[0];
 
@@ -162,7 +168,12 @@ export default function App() {
           </h2>
           {ispPanelOpen && (
             <>
-              <IspMultiSelect selected={selected} onChange={setSelected} colorIndex={colorIndex} />
+              <IspMultiSelect
+                selected={niaTab ? selectedNia : selected}
+                onChange={niaTab ? setSelectedNia : setSelected}
+                colorIndex={colorIndex}
+                niaMode={niaTab}
+              />
               <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 12 }}>{T.ispHelp}</p>
               {data && (
                 <p style={{ color: 'var(--text-dim)', fontSize: 11 }}>

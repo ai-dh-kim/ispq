@@ -14,16 +14,15 @@ const DAY = 86400000;
 export const DEFAULT_RECENT_DAYS = 7;
 const BASE_DAYS = 30;
 
-// 요약 매트릭스에 올릴 대표 지표(열). 전 지표를 다 올리면 표가 임원 친화성을 잃는다 —
-// 출처를 가로질러 범주(지연/속도/안정성/스트리밍)를 대표하는 6종만. 여기만 고치면 열이 바뀐다.
+// 요약 매트릭스에 올릴 대표 지표(열). 전 지표를 다 올리면 표가 임원 친화성을 잃는다 — 여기만 고치면 열이 바뀐다.
+// 2026-07-15 개편(사용자 지정): 다운/업은 같은 출처(Cloudflare Speed Test)로 통일해 비교 기준을 맞추고,
+// NIA 속도측정(1G 상품) 다운/업을 추가, 열 이름에 출처를 명기. 부하지연·손실률·Netflix 열은 제거.
 export const SUMMARY_METRICS: { id: string; short: string }[] = [
-  { id: 'latency', short: 'RTT' },
-  { id: 'bandwidth', short: '다운로드' },
-  { id: 'uploadBandwidth', short: '업로드' },
-  { id: 'loadedLatency', short: '부하지연' },
-  { id: 'lossRate', short: '손실률' },
-  // nfHd(HD가능)는 2026-07-15 지표 제거로 교체 — 스트리밍 범주 대표는 Netflix 실측 공개값으로.
-  { id: 'nfSpeedIndex', short: 'Netflix' },
+  { id: 'latency', short: 'RTT (Radar)' },
+  { id: 'downloadBandwidth', short: '다운로드 (SpeedTest)' },
+  { id: 'uploadBandwidth', short: '업로드 (SpeedTest)' },
+  { id: 'niaDl1g', short: '다운로드 (NIA·1G)' },
+  { id: 'niaUl1g', short: '업로드 (NIA·1G)' },
 ];
 
 export interface SummaryCell {
