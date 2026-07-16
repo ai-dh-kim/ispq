@@ -5,7 +5,10 @@ name: Collect NIA speed stats (daily)
 
 on:
   schedule:
-    - cron: '41 6 * * *' # 매일 06:41 UTC
+    # 매일 00:17 UTC = 09:17 KST(오전 수집, 2026-07-16 사용자 요청으로 오후→오전 변경).
+    # UTC 자정 직후라 스냅샷 날짜 키(UTC)와 KST 달력 날짜가 일치. GitHub 크론은 1~2시간
+    # 지연이 일상이라 실제 실행은 오전 9~11시(KST) 범위로 예상.
+    - cron: '17 0 * * *'
   workflow_dispatch: {}
 
 concurrency:
