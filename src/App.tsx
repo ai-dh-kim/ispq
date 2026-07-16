@@ -122,8 +122,10 @@ export default function App() {
           <select value={sourceId} onChange={(e) => {
             const s = e.target.value;
             setSourceId(s);
-            // Speed Test·NIA는 하루 1회 집계 → 기간 90일·집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
-            if (s === 'cfspeed' || s === 'nia') { setRange('90d'); setView('1day'); }
+            // Speed Test·NIA는 하루 1회 집계 → 집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
+            // 기간 기본값: Speed Test 90일 · NIA 30일(2026-07-16 사용자 지정) — 이후 기간은 자유 변경 가능.
+            if (s === 'cfspeed') { setRange('90d'); setView('1day'); }
+            if (s === 'nia') { setRange('30d'); setView('1day'); }
           }}>
             {Object.values(SOURCES).map((src) => (
               <option key={src.id} value={src.id}>{src.label}</option>
