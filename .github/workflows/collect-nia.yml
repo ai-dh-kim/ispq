@@ -5,12 +5,13 @@ name: Collect NIA speed stats (daily)
 
 on:
   schedule:
-    # 오전(KST) 수집 — 2026-07-16 사용자 요청. 처음 쓴 00:17 UTC는 자정 UTC 최혼잡 구간이라
-    # 2026-07-17 실행이 통째로 드롭됨 → 혼잡 구간 밖(01시대)으로 이동(2026-07-17).
-    # 01:23 UTC = 10:23 KST. 드롭 대비 백업 크론 1개 추가(02:53 UTC = 11:53 KST) —
-    # 둘 다 돌면 같은 날짜 키를 최신값으로 덮어쓸 뿐이라 무해(스냅샷 방식).
-    - cron: '23 1 * * *'
-    - cron: '53 2 * * *'
+    # 오전(KST) 수집 — 실측상 GitHub 크론이 이 저장소에서 상시 +2.5~4시간 지연됨
+    # (00:17→드롭, 01:23→04:17 실행, 02:53→05:12 실행). 지연을 상수로 보고 앞당긴다(2026-07-18):
+    #   21:43 UTC(전날) = 06:43 KST → 실제 실행 ~09:40 KST
+    #   23:13 UTC(전날) = 08:13 KST → 백업, 실제 실행 ~11:10 KST
+    # 날짜 키는 collect-nia.ts가 KST 달력 날짜로 찍으므로 전날 UTC에 돌아도 "오늘"로 기록된다.
+    - cron: '43 21 * * *'
+    - cron: '13 23 * * *'
   workflow_dispatch: {}
 
 concurrency:
@@ -19,6 +20,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write # 수집 후 Refresh(collect.yml) 즉시 트리거용
 
 jobs:
   nia:
@@ -47,6 +49,19 @@ jobs:
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
+
+      # 수집 직후 quality_data.json 재조립을 즉시 트리거 — 다음 Refresh 크론(실측 1~3시간 간격)을
+      # 기다리며 그래프 반영이 밀리는 레이스 제거(2026-07-18). GITHUB_TOKEN의 workflow_dispatch는
+      # 재귀 방지 예외라 정상 트리거된다.
+      - name: Trigger data refresh (그래프 즉시 반영)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/collect.yml/dispatches" \
+            -d '{"ref":"main"}')
+          echo "refresh dispatch HTTP $code"
+          [ "$code" = "204" ] || echo "::warning::Refresh 트리거 실패(HTTP $code) — 다음 크론 주기에 자동 반영됨"
 
       # 신선도 알람: 최근 3일 스냅샷이 전 사업자·전 값 완전 동일이면 수집기가 nia_stale.txt를 남긴다.
       # 커밋(위 단계)까지 마친 뒤 여기서 실패 처리 → 워크플로 빨간불 = GitHub 실패 알림(알람).

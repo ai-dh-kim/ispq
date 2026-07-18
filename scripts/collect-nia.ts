@@ -106,9 +106,15 @@ async function fetchTier(params: string, direct: 1 | 2): Promise<NiaRow[]> {
   return rows;
 }
 
+// 스냅샷 날짜 키 = "KST 달력 날짜"(epoch은 그 날짜의 UTC 자정) — 2026-07-18 변경.
+// GitHub 크론이 상시 ~3시간 지연되어 오전(KST) 수집을 보장하려면 UTC 21~23시(전날)에 예약해야 하는데,
+// UTC 날짜 키로는 전날로 찍혀 하루가 밀린다. NIA는 한국 통계이므로 KST 날짜가 의미상으로도 맞다.
+// (KST=UTC+9 고정이라 기존 키들과도 호환 — 지금까지의 수집은 모두 두 날짜가 일치하는 시간대에 실행됨)
+const KST_MS = 9 * 3600 * 1000;
+
 async function main() {
   const perIsp = await loadCache();
-  const today = Math.floor(Date.now() / DAY) * DAY;
+  const today = Math.floor((Date.now() + KST_MS) / DAY) * DAY;
   const cutoff = today - KEEP_DAYS * DAY;
   const dayKey = String(today);
 
