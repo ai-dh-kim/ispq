@@ -105,6 +105,8 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const DAILY = !!metric.dailyCadence;
   const tier = FIXED180 || DAILY ? 'coarse' : RANGES[range].tier;
   const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
+  // 1일 버킷 여부 — 툴팁 제목에서 무의미한 시:분(항상 00:00)을 생략하는 데 사용.
+  const dateOnly = viewDef.baseMin >= 1440;
 
   // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [effSince, maxMs]로 잡는다.
   // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.
@@ -123,6 +125,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       const base = getTierPoints(data, ispId, metricId, tier);
       // -Infinity: sinceMs로 자르지 않고 티어 전체를 차트에 공급.
       const pts = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
+      // 값이 하나도 없는 ISP는 차트에서 제외 — 전부 null인 시리즈가 끼면 ApexCharts 공유 툴팁의
+      // 호버 마커가 일부 시리즈에만 찍히는 문제가 생기고(예: NIA 10G에서 케이블사 4개가 빈 시리즈),
+      // 범례에도 죽은 항목이 남는다(2026-07-20).
+      if (!pts.some((p) => p.v != null)) continue;
       const color = colorForIsp(colorIndex(ispId), ispId);
       series.push({
         name: ISP_BY_ID[ispId]?.name || NIA_NAME_BY_ID[ispId] || ispId, // NIA 전용 케이블사는 별도 이름 맵
@@ -200,9 +206,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
           const p = s.data[dataPointIndex];
           if (p && p.x != null) { x = p.x; break; }
         }
-        const when = x == null ? '' : new Date(x).toLocaleString('ko-KR', {
-          timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-        });
+        // 1일 버킷(일별 수집 지표 포함)은 시:분이 항상 00:00이라 무의미 → 날짜만 표시(2026-07-20).
+        const when = x == null ? '' : new Date(x).toLocaleString('ko-KR', dateOnly
+          ? { timeZone: 'UTC', month: '2-digit', day: '2-digit' }
+          : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
         const blocks = cfg.map((s, i) => {
           const pt = s.data[dataPointIndex];
           if (!pt) return '';
@@ -226,7 +233,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange]);
+  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;
