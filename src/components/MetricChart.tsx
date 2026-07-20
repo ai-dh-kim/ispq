@@ -210,7 +210,18 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         const when = x == null ? '' : new Date(x).toLocaleString('ko-KR', dateOnly
           ? { timeZone: 'UTC', month: '2-digit', day: '2-digit' }
           : { timeZone: 'UTC', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-        const blocks = cfg.map((s, i) => {
+        // 툴팁 행 순서를 그래프상 위치와 일치시킨다 — 값이 큰 시리즈가 위(그래프 상단)로.
+        // Y축은 방향성과 무관하게 항상 값이 클수록 위이므로 y 내림차순이면 시각적 순서와 같다.
+        // 원래 색은 시리즈 인덱스로 잡히므로 정렬 후에도 원 인덱스(i)를 유지해 색을 맞춘다. null은 아래로.
+        const order = cfg
+          .map((s, i) => ({ s, i, y: s.data[dataPointIndex]?.y ?? null }))
+          .sort((a, b) => {
+            if (a.y == null && b.y == null) return a.i - b.i;
+            if (a.y == null) return 1;
+            if (b.y == null) return -1;
+            return b.y - a.y;
+          });
+        const blocks = order.map(({ s, i }) => {
           const pt = s.data[dataPointIndex];
           if (!pt) return '';
           const color = w.globals.colors[i];
