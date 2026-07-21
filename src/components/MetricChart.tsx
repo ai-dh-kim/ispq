@@ -184,7 +184,12 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     theme: { mode: theme },
     colors,
     stroke: { width: 2, curve: FIXED180 ? 'stepline' : 'straight', dashArray },
-    markers: { size: 0, discrete },
+    // 평소엔 점 숨김(size 0), 호버 시 6으로 표시. discrete는 저표본 경고 마커(노란 점).
+    // 참고: 포인트가 많은 차트(1시간 버킷 등)에서는 ApexCharts 4.3이 공유 툴팁의 호버 마커를
+    // 커서에 가장 가까운 시리즈 하나에만 그린다(moveDynamicPointsOnHover의 pointsArray 처리 한계).
+    // size를 키우면 전 포인트에 점이 생겨 오히려 지저분해지고 DOM이 수천 개로 늘어 성능이 나빠져,
+    // 마커 대신 툴팁(색상 스와치 + 값 내림차순 정렬)과 세로 크로스헤어로 식별하게 한다(2026-07-21 검토).
+    markers: { size: 0, hover: { size: 6 }, discrete },
     xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: xMin, max: xMax },
     yaxis: {
       title: { text: `${metric.name} (${metric.unit})` },
