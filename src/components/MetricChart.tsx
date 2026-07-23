@@ -30,6 +30,10 @@ const CHROME = {
   dark: { fore: '#b0b0b0', grid: '#333333' },
   light: { fore: '#555555', grid: '#e0e0e0' },
 };
+// 저표본 경고 점(discrete)을 켤 수 있는 시리즈 길이 상한.
+// ApexCharts는 discrete가 하나라도 있으면 "모든" 포인트에 마커 요소를 만드는데(개수 무관),
+// 조밀한 차트(1시간 버킷은 티어 전체 ~720포인트)에선 그 여파로 크로스헤어 위치 계산이 깨진다.
+const MAX_POINTS_FOR_LOW_MARKERS = 300;
 // 시리즈별 선 스타일(점선 길이). 색이 같은 위치에서 겹쳐도 구분되도록.
 const DASH_PATTERN = [0, 6, 2, 10, 4, 8];
 // 특정 ISP 고정 선 스타일: LG U+ 실선(0), KT 점선(6), SK 점점선(2).
@@ -149,6 +153,9 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     return { series, colors, discrete, dashArray, lastLiveMs: Number.isFinite(lastLiveMs) ? lastLiveMs : null };
   }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex]);
 
+  // 차트에 실린 포인트 수(티어 전체) — 저표본 점 표시 여부 판단에 사용.
+  const pointCount = series[0]?.data.length ?? 0;
+
   const chrome = CHROME[theme];
 
   // 지연 발행 지표(M-Lab ~1~2일 / dailyCadence 하루 1회): X축을 '최신 실데이터' 지점에서 멈춘다(현재까지 끌고 가지 않음).
@@ -189,7 +196,11 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     // 커서에 가장 가까운 시리즈 하나에만 그린다(moveDynamicPointsOnHover의 pointsArray 처리 한계).
     // size를 키우면 전 포인트에 점이 생겨 오히려 지저분해지고 DOM이 수천 개로 늘어 성능이 나빠져,
     // 마커 대신 툴팁(색상 스와치 + 값 내림차순 정렬)과 세로 크로스헤어로 식별하게 한다(2026-07-21 검토).
-    markers: { size: 0, hover: { size: 6 }, discrete },
+    // 저표본 경고 점(discrete)이 과다하면 ApexCharts 4.3이 크로스헤어(세로 바) 위치 계산을 망가뜨려
+    // 바가 한 지점에 붙박인다(2026-07-21 실측: M-Lab 1시간 버킷에서 2,008개 → 바가 왼쪽 고정).
+    // 게다가 그 정도로 많으면 점이 차트를 뒤덮어 경고 기능도 무의미해진다. 임계 초과 시엔 점을 생략하고
+    // 툴팁의 표본 수·저표본 문구로 안내한다(정보 손실 없음).
+    markers: { size: 0, hover: { size: 6 }, discrete: pointCount > MAX_POINTS_FOR_LOW_MARKERS ? [] : discrete },
     xaxis: { type: 'datetime', labels: { datetimeUTC: true }, min: xMin, max: xMax },
     yaxis: {
       title: { text: `${metric.name} (${metric.unit})` },
@@ -246,10 +257,14 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
             ${sub}
           </div>`;
         }).join('');
+        // 세로 크로스헤어 위치 보정(2026-07-21): 결측(null)이 있는 시리즈가 섞이면 ApexCharts 4.3이
+        // 크로스헤어 x를 pointsArray 인덱스로 계산하는데, null로 시리즈별 길이가 어긋나 바가 한 지점에
+        // 붙박인다(실측: 커서와 무관하게 423px 고정). 호버 시점의 x(시각)는 정확히 알고 있으므로
+        // 축 범위→픽셀로 직접 환산해 덮어쓴다. rAF로 미뤄 ApexCharts의 계산 뒤에 적용되게 한다.
         return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly]);
+  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly, pointCount]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;

@@ -7,12 +7,11 @@ import {
   RANGES, VIEWS, TIER_VIEWS, T,
   type RangeKey, type ViewKey,
 } from './config.ts';
-import { loadSettings, saveSettings, type ApiSettings as ApiSettingsType } from './lib/settings.ts';
+import { loadSettings } from './lib/settings.ts';
 import { captureElement, timestampName } from './lib/screenshot.ts';
 import IspMultiSelect from './components/IspMultiSelect.tsx';
 import MetricSection from './components/MetricSection.tsx';
 import SummaryPanel from './components/SummaryPanel.tsx';
-import ApiSettings from './components/ApiSettings.tsx';
 
 // 선언 순서 기반 ISP 색상 인덱스.
 const COLOR_INDEX: Record<string, number> = Object.fromEntries(ALL_ISPS.map((i, idx) => [i.id, idx]));
@@ -35,8 +34,8 @@ export default function App() {
   const [view, setView] = useState<ViewKey>(DEFAULT_VIEW);
   const [chartResetKey, setChartResetKey] = useState(0);
   const [ispPanelOpen, setIspPanelOpen] = useState(true);
-  const [settings, setSettings] = useState<ApiSettingsType>(loadSettings);
-  const [showApi, setShowApi] = useState(false);
+  // 데이터 소스 URL은 고정(설정 모달은 2026-07-21 제거) — 저장된 값이 있으면 그대로 사용.
+  const [settings] = useState(loadSettings);
   const [capturing, setCapturing] = useState(false);
   const [jumpTarget, setJumpTarget] = useState<string | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
@@ -45,8 +44,6 @@ export default function App() {
 
   const { data, loading, error } = useQualityData(settings.dataUrl);
   const colorIndex = useCallback((ispId: string) => COLOR_INDEX[ispId] ?? 0, []);
-
-  const handleSaveApi = (s: ApiSettingsType) => { setSettings(s); saveSettings(s); setShowApi(false); };
 
   // 처음 켰을 때 상태로 복원: 기간 7일·집계 1시간 + 모든 차트 줌 해제(리마운트).
   const handleReset = () => {
@@ -147,8 +144,6 @@ export default function App() {
 
         <button onClick={handleReset}>↺ {T.resetButton}</button>
 
-        <button onClick={() => setShowApi(true)}>⚙ {T.apiButton}</button>
-
         <button data-screenshot-ignore onClick={handleScreenshot} disabled={capturing}>
           📷 {capturing ? T.screenshotCapturing : T.screenshotButton}
         </button>
@@ -157,10 +152,6 @@ export default function App() {
           {theme === 'dark' ? `🌙 ${T.themeDark}` : `☀️ ${T.themeLight}`}
         </button>
       </header>
-
-      {showApi && (
-        <ApiSettings settings={settings} onSave={handleSaveApi} onClose={() => setShowApi(false)} />
-      )}
 
       <div className={`content${ispPanelOpen ? '' : ' isp-collapsed'}`}>
         <aside className="panel">

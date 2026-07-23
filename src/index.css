@@ -75,6 +75,9 @@ select, button, .control {
 }
 button:hover, select:hover { border-color: var(--accent); }
 label.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-dim); }
+/* 라벨이 위에 붙는 셀렉트(label.field)는 버튼보다 키가 커서, 중앙정렬이면 버튼이 위로 뜬다.
+   툴바 버튼을 아래쪽에 맞춰 셀렉트와 같은 높이에 놓는다(2026-07-21). */
+.toolbar > button { align-self: flex-end; }
 
 .theme-toggle { min-width: 90px; }
 
