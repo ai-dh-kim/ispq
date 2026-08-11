@@ -145,36 +145,6 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .delay-note .delay-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
 .delay-note .delay-body { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
 
-/* ---- API settings modal ---- */
-.modal-overlay {
-  position: fixed; inset: 0; z-index: 100;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center; padding: 20px;
-}
-.modal {
-  width: 100%; max-width: 520px; max-height: 86vh; overflow-y: auto;
-  background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: 12px;
-  box-shadow: 0 12px 40px var(--shadow); padding: 20px;
-}
-.modal h2 { margin: 0 0 14px; font-size: 16px; }
-.modal h3 { margin: 18px 0 8px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
-.modal-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
-.modal-field input, .provider-row input[type='password'] {
-  background: var(--surface-2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; width: 100%;
-}
-.provider-row { margin-bottom: 12px; }
-.provider-enable { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; cursor: pointer; }
-.provider-enable em { margin-left: auto; font-style: normal; font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
-.provider-enable em.on { color: var(--good); border-color: var(--good); }
-.provider-enable em.off { color: var(--text-dim); }
-.provider-row input:disabled { opacity: 0.5; }
-.modal-note { font-size: 11px; color: var(--warn); line-height: 1.5; margin: 14px 0 0; }
-.modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
-.modal-actions .spacer { flex: 1; }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-
 /* Custom ApexCharts tooltip (NFR traceability) */
 .qtt { padding: 8px 10px; font-size: 12px; }
 .qtt .qtt-title { font-weight: 600; margin-bottom: 4px; }

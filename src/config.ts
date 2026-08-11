@@ -117,12 +117,6 @@ export const T = {
   summaryMethod:
     '각 지표의 마지막 실데이터 시점 기준 최근 기간 평균을 표시된 ISP 간 상대 순위로 비교합니다(절대 등급 아님). 변화 카드는 해당 기간 평균 vs 이전 30일 평균의 변화율이며, ±10% 이상만 표시합니다. 실측값의 산술 비교로 만든 파생 지표입니다.',
   summaryJumpTip: '클릭하면 해당 지표 차트로 이동',
-  // 데이터 소스 설정 모달
-  apiButton: '데이터 소스',
-  apiTitle: '데이터 소스 설정',
-  apiDataUrl: '데이터 소스 URL (quality_data.json)',
-  apiClose: '닫기',
-  apiSecurityNote: '※ 이 대시보드는 위 URL의 quality_data.json 한 파일만 불러옵니다. 실데이터는 GitHub Actions 수집기가 API 토큰(저장소 시크릿)으로 생성·갱신하며, 클라이언트(브라우저)에는 토큰이 전혀 저장되지 않습니다(NFR-02). 보통 내 GitHub raw URL을 가리킵니다.',
   // 스크린샷
   screenshotButton: '스크린샷',
   screenshotCapturing: '캡처 중…',

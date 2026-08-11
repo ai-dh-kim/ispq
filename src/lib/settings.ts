@@ -5,7 +5,8 @@
 const KEY = 'fbqd-api-settings';
 
 // 기본 데이터 소스 = 내 GitHub raw quality_data.json (수집기가 주기적으로 갱신).
-// dev/prod 구분 없이 항상 이 URL을 기본으로 fetch. 모달에서 변경 가능(예: 로컬 테스트 시 /quality_data.json).
+// dev/prod 구분 없이 항상 이 URL을 기본으로 fetch. 화면에서 바꾸는 경로는 없다(설정 모달 2026-07-23 제거).
+// loadSettings가 localStorage를 계속 읽는 건 모달 시절에 저장된 값이 남아 있을 수 있어서다(레거시 존중).
 const RAW_DATA_URL =
   'https://raw.githubusercontent.com/ai-dh-kim/ispq/main/public/quality_data.json';
 
@@ -27,8 +28,4 @@ export function loadSettings(): ApiSettings {
   } catch {
     return DEFAULT_SETTINGS;
   }
-}
-
-export function saveSettings(s: ApiSettings): void {
-  localStorage.setItem(KEY, JSON.stringify(s));
 }
