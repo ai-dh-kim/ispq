@@ -20,8 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # rebase-before-push 위해 전체 이력 필요
+        # 얕은 체크아웃으로 충분(2026-08-20). 예전엔 rebase-before-push 때문에 fetch-depth: 0 이
+        # 필요했지만, 커밋 단계가 "최신 원격 위에 다시 올리는" 방식으로 바뀌어 전체 이력이 불필요하다.
+        # 저장소가 이미 ~159MB(9MB 파일 × 1000+ 커밋)라 전체 클론은 실행시간만 잡아먹었다.
 
       - uses: actions/setup-node@v5
         with:
@@ -37,16 +38,48 @@ jobs:
           RIPE_ATLAS_KEY: ${{ secrets.RIPE_ATLAS_KEY }}
         run: node scripts/generate-mock.ts
 
+      # 경합 처리(2026-08-20 재작성) — 기존 "커밋 후 pull --rebase"는 실패율 2.6%의 원인이었다.
+      # concurrency 그룹이 동시 실행은 막지만, 큐에서 기다린 실행은 '트리거 시점의 낡은 SHA'를
+      # 체크아웃한다. 그 사이 다른 실행이 quality_data.json 을 통째로 갈아치우고 push하면,
+      # 뒤늦은 rebase는 같은 9MB 파일을 양쪽이 전부 고쳐놨으므로 반드시 충돌한다(--autostash는
+      # 커밋 안 된 변경만 처리하므로 무력). NIA 수집이 Refresh를 추가 dispatch하면서 겹칠 기회가
+      # 늘어 실패가 그 시간대에 몰렸다.
+      #
+      # quality_data.json 은 매 실행 '전체 재생성'이라 방금 만든 것이 항상 최신이다. 따라서
+      # 병합할 것이 없다 — 최신 원격으로 reset한 뒤 생성물을 얹어 커밋하면 충돌이 원천적으로 없다.
+      # push가 또 밀리면(그 찰나에 누가 먼저 올림) 같은 절차를 최대 3회 재시도한다.
       - name: Commit refreshed cache
         run: |
+          set -euo pipefail
           git config user.name "quality-bot"
           git config user.email "quality-bot@users.noreply.github.com"
-          git add public/quality_data.json
-          if git diff --cached --quiet; then
-            echo "No data changes."
-          else
+
+          # 생성물을 작업트리 밖으로 대피(아래 reset --hard 가 작업트리를 되돌리므로).
+          # 생성기가 쓰는 파일은 quality_data.json 하나뿐이라 이 한 개만 보존하면 된다.
+          cp public/quality_data.json "${RUNNER_TEMP}/quality_data.json"
+
+          for attempt in 1 2 3; do
+            # FETCH_HEAD 를 쓰면 remote.origin.fetch 리프스펙 설정과 무관하게 항상 최신 브랜치 끝을 가리킨다.
+            git fetch --no-tags origin "${GITHUB_REF_NAME}"
+            git reset --hard FETCH_HEAD
+
+            cp "${RUNNER_TEMP}/quality_data.json" public/quality_data.json
+            git add public/quality_data.json
+
+            if git diff --cached --quiet; then
+              echo "No data changes."
+              exit 0
+            fi
+
             git commit -m "chore(data): 10-min quality refresh [skip ci]"
-            # 원격이 앞서 있어도(재실행/경합) 안전하게: rebase 후 push
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "pushed on attempt ${attempt}"
+              exit 0
+            fi
+
+            echo "::notice::push raced on attempt ${attempt} — 최신 원격 위로 다시 올려 재시도"
+          done
+
+          echo "::error::3회 재시도 후에도 push 실패 — 다음 크론 주기가 어차피 전체 재생성하므로 데이터 손실은 없음"
+          exit 1
