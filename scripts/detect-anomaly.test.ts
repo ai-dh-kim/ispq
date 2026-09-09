@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import { extractSeries, weeklyChartSvg, svgToPng, renderWeeklyCharts } from './weekly-charts.ts';
+import { tmpdir } from 'node:os';
 import type { QualityData } from '../src/types.ts';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -143,7 +145,26 @@ async function main() {
     const md = buildReport(base, real, caches, now, w);
     ok(md.startsWith('# 주간 요약 (8/31(월)~9/6(일))') && md.includes('지난주 이벤트 0건'), 'markdown 주간 요약 제목·이벤트 수'); }
 
-  console.log('\n[8] 정의 무결성');
+  console.log('\n[8] 주간 추이 차트 (SVG → PNG)');
+  { const w = prevWeekWindow(Date.UTC(2026, 8, 9, 0, 0));
+    const ser = extractSeries(real, 'downloadBandwidth', w.from);
+    ok(ser.length === 3 && ser.every((s) => s.weeks.length === 3 && s.weeks.every((wk) => wk.length === 7)), '시리즈: 3사 × 3주 × 7일');
+    const ktLastWeek = ser.find((s) => s.isp === 'kt')!.weeks[0];
+    ok(ktLastWeek.filter((x) => x != null).length === 7 && ktLastWeek[0] === real.series.kt.downloadBandwidth.coarse[0][real.tiers.coarse.t.indexOf(w.from)], 'kt 지난주 월요일 값 = coarse 버킷 값');
+    const svg = weeklyChartSvg(ser, ['8/31', '9/1', '9/2', '9/3', '9/4', '9/5', '9/6'], 'Mbps');
+    ok(svg.startsWith('<svg') && (svg.match(/<path /g) ?? []).length === 9 && (svg.match(/<circle /g) ?? []).length === 21, `SVG: 선 9개(3사×3주) · 지난주 점 21개 (${(svg.match(/<path /g) ?? []).length}/${(svg.match(/<circle /g) ?? []).length})`);
+    // 결측이 있으면 선이 끊긴다(M 명령이 늘어남)
+    const gap = clone(ser); gap[0].weeks[0][3] = null;
+    ok((weeklyChartSvg(gap, ['a', 'b', 'c', 'd', 'e', 'f', 'g'], '').match(/M[\d.]+ [\d.]+/g) ?? []).length === 10, '결측일은 선을 끊음');
+    const png = svgToPng(svg);
+    ok(png.length > 2000 && png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47, `PNG 변환 ${(png.length / 1024).toFixed(0)}KB, 시그니처 정상`);
+    const dir = resolve(tmpdir(), `ispq-charts-${Date.now()}`);
+    const charts = await renderWeeklyCharts(real, w.from, [{ id: 'latency', short: 'RTT', unit: 'ms' }, { id: 'ipv6', short: 'IPv6', unit: '%' }], dir);
+    ok(charts.length === 2 && charts.every((c) => c.bytes > 1000 && c.file.startsWith('weekly-')), `renderWeeklyCharts: ${charts.map((c) => `${c.file} ${(c.bytes / 1024).toFixed(0)}KB`).join(', ')}`);
+    const html = buildMailHtml(base, real, caches, now, { week: w, charts, chartBase: 'https://x/y' });
+    ok(html.includes('지난주 일별 추이') && html.includes('https://x/y/weekly-latency.png') && html.includes('<img '), 'HTML 주간 메일: 추이 섹션 + 차트 URL'); }
+
+  console.log('\n[9] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
   ok(KR3.every((i) => real.series[i]), 'KR3 존재');
   ok(new Set(TRIGGERS.flatMap((t) => t.rules.map((r) => `${t.id}:${r.key}`))).size === TRIGGERS.reduce((n, t) => n + t.rules.length, 0), '규칙 키 중복 없음');

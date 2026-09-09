@@ -16,6 +16,7 @@ import { ISP_BY_ID, NIA_NAME_BY_ID } from '../src/data/isps.ts';
 import { METRIC_BY_ID } from '../src/data/metrics.ts';
 import { SUMMARY_METRICS, buildSummary } from '../src/lib/summary.ts';
 import type { QualityData } from '../src/types.ts';
+import { renderWeeklyCharts, type ChartSpec, type RenderedChart } from './weekly-charts.ts';
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -26,6 +27,15 @@ const STATE_FILE = resolve(PUBLIC, 'alerts.json');
 const REPORT_FILE = process.env.ALERT_REPORT ?? resolve(__dir, '../alert_report.md'); // Step Summary용(markdown)
 const REPORT_HTML = process.env.ALERT_REPORT_HTML ?? resolve(__dir, '../alert_report.html'); // 메일 본문용(인라인 스타일 HTML)
 const DASHBOARD_URL = 'https://ai-dh-kim.github.io/ispq/';
+const CHARTS_DIR = resolve(PUBLIC, 'alert_charts'); // 주간 추이 PNG(매주 덮어씀, 커밋됨)
+// 메일의 <img src>는 커밋 SHA 고정 raw URL이어야 하는데 SHA는 커밋 뒤에야 안다 → 자리표시자를 쓰고 워크플로가 sed로 치환.
+const CHART_BASE = process.env.ALERT_CHART_BASE ?? '__CHART_BASE__';
+// 추이 차트 대상: 종합지표 5종 + 사건 트리거 지표 4종(값이 계단형·저수준이라 순위표엔 없지만 주간 변화는 선으로 봐야 보인다).
+const CHART_SPECS: ChartSpec[] = [
+  ...SUMMARY_METRICS.map((m) => ({ id: m.id, short: m.short, unit: METRIC_BY_ID[m.id]?.unit ?? '' })),
+  { id: 'ipv6', short: 'IPv6 채택률 (Radar)', unit: '%' }, { id: 'dnssec', short: 'DNSSEC 검증률 (APNIC)', unit: '%' },
+  { id: 'rpkiValid', short: 'RPKI 유효율 (Radar)', unit: '%' }, { id: 'packetLoss', short: '패킷 손실률 (SpeedTest)', unit: '%' },
+];
 
 export const KR3 = ['kt', 'skb', 'lgu'];
 const CLEAR_DAYS = 7; // 해소 판정: 반대 조건(=미충족) 연속 일수
@@ -350,7 +360,7 @@ const FONT = 'font-family:Malgun Gothic,Arial,sans-serif;';
 const GROUP_LABEL: Record<Check['group'], string> = { A: '사건 트리거 (A) — 구조 변화·장애', S: '속도 트리거 (S) — 28일 대비 하락', D: '운영 트리거 (D) — 수집 상태' };
 
 export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number,
-  opts: { runUrl?: string; test?: boolean; week?: WeekWindow } = {}): string {
+  opts: { runUrl?: string; test?: boolean; week?: WeekWindow; charts?: RenderedChart[]; chartBase?: string } = {}): string {
   const kst = new Date(now).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16);
   const fired = r.events.filter((e) => e.type === 'fire'), cleared = r.events.filter((e) => e.type === 'clear');
   const act = Object.entries(r.state.active);
@@ -400,6 +410,9 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit, m.hib)).join('')}</tr>`).join(''));
   const weekEventsHtml = wev.length ? wev.map(eventCard).join('')
     : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">지난주 발동·해소 이벤트 없음 — 트리거 전부 정상 범위였습니다.</div>`;
+  // 일별 추이 차트 — 주간 평균이 지우는 '하루 튐'을 선으로 되살린다. 1·2주 전을 겹쳐 반복 패턴(주말 효과)과 이탈을 구분.
+  const chartsHtml = (opts.charts ?? []).map((c) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr><td style="padding:0 0 4px;font-size:12.5px;font-weight:700;color:${C.ink};${FONT}">${esc(c.short)}</td></tr>` +
+    `<tr><td><img src="${esc(`${opts.chartBase ?? CHART_BASE}/${c.file}`)}" width="640" height="125" alt="${esc(c.short)} 지난주 일별 추이" style="display:block;width:100%;max-width:640px;height:auto;border:0"></td></tr></table>`).join('');
 
   // 수집 신선도
   const freshChip = (f: DigestData['fresh'][number]) => { const s = freshState(f); return s === 'ok' ? chip('정상', C.good, C.goodSoft) : s === 'warn' ? chip('주의', C.warn, C.warnSoft) : s === 'over' ? chip('허용 초과', C.bad, C.badSoft) : chip('파일 없음', C.bad, C.badSoft); };
@@ -428,6 +441,7 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     (week ? section(`지난주 이벤트 (${week.label})`, weekEventsHtml) + (r.events.length ? section('오늘 신규 이벤트', eventsHtml) : '') : section('이벤트', eventsHtml)) +
     section('활성 알림', activeHtml) +
     section('국내 3사 대표 지표 순위', ranksHtml, week ? `지난주 ${week.label} 일별 집계 평균 · 1위 초록 · 꼴찌 빨강 · 화살표는 전전주 대비 변화(초록=개선, 빨강=악화)` : '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
+    (week && opts.charts?.length ? section('지난주 일별 추이', chartsHtml, `진한 선·점 = 지난주 ${week.label} · 연한 선 = 1주 전 · 더 연한 선 = 2주 전 · 세 패널은 같은 눈금(사업자 간 수준 비교 가능) · 평균에 묻히는 하루 튐은 여기서 보입니다`) : '') +
     section('수집 신선도', freshHtml) + section('트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +
     `<tr><td style="padding:18px 0 0;border-top:1px solid ${C.line};margin-top:18px;font-size:11px;color:${C.faint};${FONT}">${links} · 판정 규칙: 핸드오프 문서 §17 · 이 메일은 자동 발송됩니다</td></tr>` +
     `</table></td></tr></table></body></html>`;
@@ -450,11 +464,13 @@ async function main() {
   const week = weekly ? prevWeekWindow(now) : undefined;
   const r = evaluate({ data, cacheGeneratedAt, now, prev });
   await writeFile(STATE_FILE, JSON.stringify(r.state, null, 1));
+  const charts = week ? await renderWeeklyCharts(data, week.from, CHART_SPECS, CHARTS_DIR) : [];
+  if (charts.length) console.log(`[alert] 주간 추이 차트 ${charts.length}장 → ${CHARTS_DIR} (${charts.map((c) => `${c.id} ${(c.bytes / 1024).toFixed(0)}KB`).join(', ')})`);
   const report = buildReport(r, data, cacheGeneratedAt, now, week);
   await writeFile(REPORT_FILE, report);
   const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
     ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined;
-  await writeFile(REPORT_HTML, buildMailHtml(r, data, cacheGeneratedAt, now, { runUrl, test: process.env.ALERT_TEST_MAIL === 'true', week }));
+  await writeFile(REPORT_HTML, buildMailHtml(r, data, cacheGeneratedAt, now, { runUrl, test: process.env.ALERT_TEST_MAIL === 'true', week, charts }));
   console.log(report);
 
   // 워크플로 출력: 신규 이벤트 수 · 주간 여부 · 메일 제목

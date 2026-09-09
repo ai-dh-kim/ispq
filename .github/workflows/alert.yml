@@ -44,8 +44,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: npm
 
-      - name: Evaluate triggers → alerts.json + report
+      # 주간 추이 차트(SVG→PNG)에 @resvg/resvg-js 가 필요(다른 수집기는 의존성 0이라 npm ci 가 없었음).
+      - run: npm ci --no-audit --no-fund
+
+      - name: Evaluate triggers → alerts.json + report (+ 주간이면 추이 차트 PNG)
         id: detect
         env:
           ALERT_REPORT: ${{ runner.temp }}/alert_report.md        # Step Summary용 markdown
@@ -58,24 +62,36 @@ jobs:
         run: cat "${{ runner.temp }}/alert_report.md" >> "$GITHUB_STEP_SUMMARY"
 
       # 커밋 방식은 collect.yml 과 동일(최신 원격으로 reset 후 생성물을 얹음 — 리베이스 경합 없음, §15).
-      # alerts.json 은 이 워크플로만 쓰므로 대피시킬 파일도 하나뿐이다.
-      - name: Commit alerts.json
+      # 이 워크플로만 쓰는 파일(alerts.json + 주간 차트 PNG)만 대피·복원한다. 커밋 SHA를 출력해 메일의 이미지 URL에 고정.
+      - name: Commit alerts.json (+ weekly charts)
+        id: commit
         run: |
           set -euo pipefail
           git config user.name "quality-bot"
           git config user.email "quality-bot@users.noreply.github.com"
           cp public/alerts.json "${RUNNER_TEMP}/alerts.json"
+          rm -rf "${RUNNER_TEMP}/alert_charts"
+          if [ -d public/alert_charts ]; then cp -r public/alert_charts "${RUNNER_TEMP}/alert_charts"; fi
           for attempt in 1 2 3; do
             git fetch --no-tags origin "${GITHUB_REF_NAME}"
             git reset --hard FETCH_HEAD
             cp "${RUNNER_TEMP}/alerts.json" public/alerts.json
             git add public/alerts.json
-            if git diff --cached --quiet; then echo "No alert state changes."; exit 0; fi
-            git commit -m "chore(alert): daily trigger evaluation [skip ci]"
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo "pushed on attempt ${attempt}"; exit 0; fi
+            if [ -d "${RUNNER_TEMP}/alert_charts" ]; then
+              mkdir -p public/alert_charts && cp "${RUNNER_TEMP}"/alert_charts/*.png public/alert_charts/ && git add public/alert_charts
+            fi
+            if git diff --cached --quiet; then echo "No alert state changes."; echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0; fi
+            git commit -m "chore(alert): trigger evaluation${ALERT_WEEKLY_FLAG:+ + weekly charts} [skip ci]"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo "pushed on attempt ${attempt}"; echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0; fi
             echo "::notice::push raced on attempt ${attempt} — 재시도"
           done
           echo "::error::3회 재시도 후에도 push 실패"; exit 1
+        env:
+          ALERT_WEEKLY_FLAG: ${{ (github.event.schedule == '15 21 * * 0' || inputs.weekly == true) && '1' || '' }}
+
+      # 메일의 <img src> 자리표시자를 방금 커밋의 SHA 고정 raw URL로 치환(옛 메일도 이미지가 영구히 남는다).
+      - name: Resolve chart URLs
+        run: sed -i "s#__CHART_BASE__#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${{ steps.commit.outputs.sha }}/public/alert_charts#g" "${{ runner.temp }}/alert_report.html"
 
       # inputs.test_mail 은 boolean 타입이라 문자열 'true'와 비교하면 안 됨(GitHub 식은 타입이 다르면 숫자로 강제변환 → false).
       - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일 아침 크론 · test_mail 이면 무조건)
