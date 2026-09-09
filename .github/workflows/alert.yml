@@ -4,6 +4,7 @@
 # (= 드라이런 뷰어: 메일을 켜지 않아도 "울렸다면 이런 메일이 갔을 것"을 Actions 탭에서 볼 수 있다).
 #
 # 메일 발송은 저장소 변수 ALERT_MAIL_ENABLED=true 일 때만, 그리고 (신규 이벤트가 있거나 월요일)일 때만.
+# 수동 실행의 test_mail=true 는 그와 무관하게 1통 강제 발송(배관 확인). 2026-09-09 드라이런 생략하고 바로 활성화.
 # 필요한 시크릿: ALERT_SMTP_HOST · ALERT_SMTP_PORT · ALERT_SMTP_USER · ALERT_SMTP_PASS · ALERT_MAIL_TO · ALERT_MAIL_FROM
 name: Quality alert triggers (daily)
 
@@ -12,7 +13,12 @@ on:
     # 12:00 KST 명목(03:00 UTC). 이 저장소의 크론 실측 지연(+2.5~4h)을 감안하면 실제 ~15:00 KST —
     # 일별 수집 7종(~06~12 KST)과 NIA→Refresh 체인이 모두 끝난 뒤다.
     - cron: '0 3 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      test_mail:
+        description: '테스트 메일 1통 강제 발송 (스위치·이벤트 유무 무관) — SMTP 배관 확인용'
+        type: boolean
+        default: false
 
 concurrency:
   group: quality-alert
@@ -60,8 +66,9 @@ jobs:
           done
           echo "::error::3회 재시도 후에도 push 실패"; exit 1
 
-      - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일)
-        if: ${{ vars.ALERT_MAIL_ENABLED == 'true' && (steps.detect.outputs.new_events != '0' || steps.detect.outputs.weekday == '1') }}
+      # inputs.test_mail 은 boolean 타입이라 문자열 'true'와 비교하면 안 됨(GitHub 식은 타입이 다르면 숫자로 강제변환 → false).
+      - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일 · test_mail 이면 무조건)
+        if: ${{ (vars.ALERT_MAIL_ENABLED == 'true' && (steps.detect.outputs.new_events != '0' || steps.detect.outputs.weekday == '1')) || inputs.test_mail == true }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.ALERT_SMTP_HOST }}
@@ -69,7 +76,7 @@ jobs:
           secure: true
           username: ${{ secrets.ALERT_SMTP_USER }}
           password: ${{ secrets.ALERT_SMTP_PASS }}
-          subject: ${{ steps.detect.outputs.subject }}
+          subject: ${{ inputs.test_mail == true && '[ISPQ 테스트] 알림 메일 배관 확인 — 본문은 오늘 판정 보고서' || steps.detect.outputs.subject }}
           to: ${{ secrets.ALERT_MAIL_TO }}
           from: ${{ secrets.ALERT_MAIL_FROM }}
           convert_markdown: true
