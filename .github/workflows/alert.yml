@@ -91,7 +91,11 @@ jobs:
 
       # 메일의 <img src> 자리표시자를 방금 커밋의 SHA 고정 raw URL로 치환(옛 메일도 이미지가 영구히 남는다).
       - name: Resolve chart URLs
-        run: sed -i "s#__CHART_BASE__#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${{ steps.commit.outputs.sha }}/public/alert_charts#g" "${{ runner.temp }}/alert_report.html"
+        run: |
+          HTML="${{ runner.temp }}/alert_report.html"
+          sed -i "s#__CHART_BASE__#https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${{ steps.commit.outputs.sha }}/public/alert_charts#g" "$HTML"
+          if grep -q __CHART_BASE__ "$HTML"; then echo "::error::차트 URL 자리표시자 치환 실패"; exit 1; fi
+          echo "chart base: $(grep -o 'https://raw.githubusercontent.com[^"]*alert_charts' "$HTML" | head -1 || echo '(주간 아님 — 차트 없음)')"
 
       # inputs.test_mail 은 boolean 타입이라 문자열 'true'와 비교하면 안 됨(GitHub 식은 타입이 다르면 숫자로 강제변환 → false).
       - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일 아침 크론 · test_mail 이면 무조건)
