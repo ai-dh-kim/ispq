@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, emptyState, buildMailHtml, buildReport, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
 import type { QualityData } from '../src/types.ts';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -122,7 +122,28 @@ async function main() {
     const html = buildMailHtml(rr, d, caches, now, { test: true });
     ok(html.includes('신규 발동') && html.includes('A1:kt:rise') && html.includes('테스트 발송') && html.includes('발동 중'), 'HTML 메일: 발동 카드·활성 상태·테스트 표기'); }
 
-  console.log('\n[7] 정의 무결성');
+  console.log('\n[7] 주간 요약 (지난주 월~일 창)');
+  { // 2026-09-09(수) 09:00 KST → 지난주 = 8/31(월)~9/6(일)
+    const w = prevWeekWindow(Date.UTC(2026, 8, 9, 0, 0)); // 00:00Z = 09:00 KST
+    ok(w.label === '8/31(월)~9/6(일)' && new Date(w.from).toISOString().slice(0, 10) === '2026-08-31' && new Date(w.to).toISOString().slice(0, 10) === '2026-09-07', `창 ${w.label} (${new Date(w.from).toISOString().slice(0, 10)}~)`);
+    const mon = prevWeekWindow(Date.UTC(2026, 8, 6, 22, 0)); // 9/6(일) 22:00Z = 9/7(월) 07:00 KST → 월요일 아침 실행
+    ok(mon.label === '8/31(월)~9/6(일)', `월요일 아침 실행도 같은 창: ${mon.label}`);
+    const sun = prevWeekWindow(Date.UTC(2026, 8, 6, 12, 0)); // 9/6(일) 21:00 KST → 아직 그 전주
+    ok(sun.label === '8/24(월)~8/30(일)', `일요일 밤은 전주 창: ${sun.label}`);
+    const dg = digestData(real, caches, now, w);
+    const dl = dg.ranks.find((m) => m.id === 'downloadBandwidth')!;
+    // 수동 계산과 대조: kt 다운로드의 8/31~9/6 평균
+    const axis = real.tiers.coarse.t, v = real.series.kt.downloadBandwidth.coarse[0]; let s = 0, n = 0;
+    for (let i = 0; i < axis.length; i++) if (v[i] != null && axis[i] >= w.from && axis[i] < w.to) { s += v[i] as number; n++; }
+    const kt = dl.cells.find((c) => c.isp === 'kt')!;
+    ok(n === 7 && Math.abs((kt.v ?? 0) - s / n) < 1e-9, `kt 다운로드 지난주 평균 ${kt.v?.toFixed(1)} (버킷 ${n}개) = 수동 계산`);
+    ok(dl.cells.every((c) => c.rank != null && c.delta != null) && new Set(dl.cells.map((c) => c.rank)).size === 3, `순위 1~3 부여 · 전전주 대비 Δ 계산: ${dl.cells.map((c) => `${c.isp}=${c.rank}위 ${c.delta!.toFixed(1)}%`).join(' ')}`);
+    const html = buildMailHtml(base, real, caches, now, { week: w });
+    ok(html.includes('주간 요약 — 지난주 8/31(월)~9/6(일)') && html.includes('지난주 이벤트') && /[▲▼]|보합/.test(html), 'HTML 주간 요약: 제목·지난주 이벤트·Δ 표시');
+    const md = buildReport(base, real, caches, now, w);
+    ok(md.startsWith('# 주간 요약 (8/31(월)~9/6(일))') && md.includes('지난주 이벤트 0건'), 'markdown 주간 요약 제목·이벤트 수'); }
+
+  console.log('\n[8] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
   ok(KR3.every((i) => real.series[i]), 'KR3 존재');
   ok(new Set(TRIGGERS.flatMap((t) => t.rules.map((r) => `${t.id}:${r.key}`))).size === TRIGGERS.reduce((n, t) => n + t.rules.length, 0), '규칙 키 중복 없음');

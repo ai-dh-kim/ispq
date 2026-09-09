@@ -3,7 +3,7 @@
 # public/alerts.json(활성 알림 + 이력)을 커밋한다. 판정 보고서는 매 실행 Step Summary 에 남는다
 # (= 드라이런 뷰어: 메일을 켜지 않아도 "울렸다면 이런 메일이 갔을 것"을 Actions 탭에서 볼 수 있다).
 #
-# 메일 발송은 저장소 변수 ALERT_MAIL_ENABLED=true 일 때만, 그리고 (신규 이벤트가 있거나 월요일)일 때만.
+# 메일 발송은 저장소 변수 ALERT_MAIL_ENABLED=true 일 때만, 그리고 (신규 이벤트가 있거나 주간 요약 크론)일 때만.
 # 수동 실행의 test_mail=true 는 그와 무관하게 1통 강제 발송(배관 확인). 2026-09-09 드라이런 생략하고 바로 활성화.
 # 필요한 시크릿: ALERT_SMTP_HOST · ALERT_SMTP_PORT · ALERT_SMTP_USER · ALERT_SMTP_PASS · ALERT_MAIL_TO · ALERT_MAIL_FROM
 name: Quality alert triggers (daily)
@@ -13,10 +13,18 @@ on:
     # 12:00 KST 명목(03:00 UTC). 이 저장소의 크론 실측 지연(+2.5~4h)을 감안하면 실제 ~15:00 KST —
     # 일별 수집 7종(~06~12 KST)과 NIA→Refresh 체인이 모두 끝난 뒤다.
     - cron: '0 3 * * *'
+    # 주간 요약: 월요일 09:00 KST 목표. 명목 06:15 KST(일 21:15 UTC)로 걸어 이 저장소의 크론 지연(+2.5~4h 실측)을
+    # 흡수한다 → 실제 ~08:45~10:15 KST. 며칠 관찰 후 어긋나면 이 시각만 조정. 판정 자체는 일별과 동일하게 수행하고
+    # 요약 부분만 '지난주 월~일' 창으로 계산(ALERT_WEEKLY).
+    - cron: '15 21 * * 0'
   workflow_dispatch:
     inputs:
       test_mail:
         description: '테스트 메일 1통 강제 발송 (스위치·이벤트 유무 무관) — SMTP 배관 확인용'
+        type: boolean
+        default: false
+      weekly:
+        description: '주간 요약 형식으로 실행 (지난주 월~일 기준 순위·이벤트)'
         type: boolean
         default: false
 
@@ -43,6 +51,7 @@ jobs:
           ALERT_REPORT: ${{ runner.temp }}/alert_report.md        # Step Summary용 markdown
           ALERT_REPORT_HTML: ${{ runner.temp }}/alert_report.html # 메일 본문용 HTML(판정기가 직접 생성 — 마크다운 변환기는 표를 못 그림)
           ALERT_TEST_MAIL: ${{ inputs.test_mail == true }}
+          ALERT_WEEKLY: ${{ github.event.schedule == '15 21 * * 0' || inputs.weekly == true }}
         run: node scripts/detect-anomaly.ts
 
       - name: Publish report to step summary
@@ -69,8 +78,8 @@ jobs:
           echo "::error::3회 재시도 후에도 push 실패"; exit 1
 
       # inputs.test_mail 은 boolean 타입이라 문자열 'true'와 비교하면 안 됨(GitHub 식은 타입이 다르면 숫자로 강제변환 → false).
-      - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일 · test_mail 이면 무조건)
-        if: ${{ (vars.ALERT_MAIL_ENABLED == 'true' && (steps.detect.outputs.new_events != '0' || steps.detect.outputs.weekday == '1')) || inputs.test_mail == true }}
+      - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일 아침 크론 · test_mail 이면 무조건)
+        if: ${{ (vars.ALERT_MAIL_ENABLED == 'true' && (steps.detect.outputs.new_events != '0' || steps.detect.outputs.weekly == 'true')) || inputs.test_mail == true }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.ALERT_SMTP_HOST }}

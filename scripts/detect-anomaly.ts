@@ -259,39 +259,75 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
   return { state: { version: 1, updatedAt: nowIso, lastRun: { at: nowIso, events: events.length }, active, history }, events, checks };
 }
 
-// ---- 요약 재료: 3사 대표 지표 순위(종합지표 패널과 동일 계산) + 수집 신선도 ----
-export interface RankCell { isp: string; v: number | null; rank: number | null; ranked: number }
-export interface DigestData {
-  ranks: { id: string; short: string; unit: string; cells: RankCell[] }[];
-  fresh: { name: string; ageH: number | null; limitH: number }[];
+// ---- 주간 창: 지난주 월~일 (KST 달력 기준) ----
+// coarse 버킷은 UTC 자정 키라 '날짜 라벨'로 다룬다 — 월요일 라벨 버킷 ~ 일요일 라벨 버킷 7개.
+export interface WeekWindow { from: number; to: number; prevFrom: number; label: string } // [from,to) · prev=[prevFrom,from)
+const mdLabel = (ms: number) => { const d = new Date(ms); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`; };
+export function prevWeekWindow(now: number): WeekWindow {
+  const kst = new Date(now + 9 * HOUR); // UTC getter = KST 달력
+  const sinceMon = (kst.getUTCDay() + 6) % 7; // 월=0
+  const thisMon = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() - sinceMon);
+  const from = thisMon - 7 * DAY;
+  return { from, to: thisMon, prevFrom: thisMon - 14 * DAY, label: `${mdLabel(from)}(월)~${mdLabel(thisMon - DAY)}(일)` };
 }
-export function digestData(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): DigestData {
-  const rows = buildSummary(data, KR3, SUMMARY_METRICS.map((m) => m.id), 7);
-  const ranks = SUMMARY_METRICS.map((m) => ({ id: m.id, short: m.short, unit: METRIC_BY_ID[m.id]?.unit ?? '', cells: KR3.map((isp) => ({ isp, ...rows.get(isp)![m.id] })) }));
+function windowMean(data: QualityData, isp: string, metric: string, from: number, to: number): number | null {
+  const v = data.series[isp]?.[metric]?.coarse?.[0]; if (!v) return null;
+  const axis = data.tiers.coarse.t; let s = 0, n = 0;
+  for (let i = 0; i < axis.length; i++) { const x = v[i]; if (x != null && axis[i] >= from && axis[i] < to) { s += x; n++; } }
+  return n ? s / n : null;
+}
+
+// ---- 요약 재료: 3사 대표 지표 순위(종합지표 패널과 동일 지표·색 규칙) + 수집 신선도 ----
+export interface RankCell { isp: string; v: number | null; rank: number | null; ranked: number; delta?: number | null } // delta: 전전주 대비 %
+export interface DigestData {
+  ranks: { id: string; short: string; unit: string; hib: boolean; cells: RankCell[] }[];
+  fresh: { name: string; ageH: number | null; limitH: number }[];
+  week?: WeekWindow;
+}
+export function digestData(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number, week?: WeekWindow): DigestData {
+  let ranks: DigestData['ranks'];
+  if (week) {
+    // 주간: 지난주 7일 평균으로 순위, 전전주 평균 대비 변화율
+    ranks = SUMMARY_METRICS.map((m) => {
+      const hib = METRIC_BY_ID[m.id]?.higherIsBetter ?? true;
+      const cells: RankCell[] = KR3.map((isp) => {
+        const v = windowMean(data, isp, m.id, week.from, week.to), p = windowMean(data, isp, m.id, week.prevFrom, week.from);
+        return { isp, v, rank: null, ranked: 0, delta: v != null && p != null && p !== 0 ? ((v - p) / p) * 100 : null };
+      });
+      const vals = cells.filter((c) => c.v != null);
+      for (const c of cells) if (c.v != null) { c.rank = vals.filter((o) => (hib ? o.v! > c.v! : o.v! < c.v!)).length + 1; c.ranked = vals.length; }
+      return { id: m.id, short: m.short, unit: METRIC_BY_ID[m.id]?.unit ?? '', hib, cells };
+    });
+  } else {
+    const rows = buildSummary(data, KR3, SUMMARY_METRICS.map((m) => m.id), 7);
+    ranks = SUMMARY_METRICS.map((m) => ({ id: m.id, short: m.short, unit: METRIC_BY_ID[m.id]?.unit ?? '', hib: METRIC_BY_ID[m.id]?.higherIsBetter ?? true, cells: KR3.map((isp) => ({ isp, ...rows.get(isp)![m.id] })) }));
+  }
   const fresh = [
     { name: 'quality_data', ageH: (now - Date.parse(data.generatedAt)) / HOUR, limitH: D1A_HOURS },
     ...CACHE_NAMES.map((n) => { const g = cacheGeneratedAt[n]; return { name: n, ageH: g ? (now - Date.parse(g)) / HOUR : null, limitH: D1B_HOURS }; }),
   ];
-  return { ranks, fresh };
+  return { ranks, fresh, week };
 }
 const round1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
+const weekEvents = (state: AlertState, week: WeekWindow) => state.history.filter((e) => { const t = Date.parse(e.at) + 9 * HOUR; return t >= week.from && t < week.to; });
 
 // Step Summary(markdown)용
-export function digest(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): string {
-  const dg = digestData(data, cacheGeneratedAt, now);
+export function digest(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number, week?: WeekWindow): string {
+  const dg = digestData(data, cacheGeneratedAt, now, week);
   const lines: string[] = ['| 지표 | 1위 | 2위 | 3위 |', '|---|---|---|---|'];
   for (const m of dg.ranks) {
     const cells = m.cells.filter((c) => c.rank != null).sort((a, b) => a.rank! - b.rank!);
-    lines.push(`| ${m.short} | ${cells.map((c) => `${ispName(c.isp)} ${fmt(round1(c.v), m.unit)}`).join(' | ')} |`);
+    lines.push(`| ${m.short} | ${cells.map((c) => `${ispName(c.isp)} ${fmt(round1(c.v), m.unit)}${c.delta != null ? ` (${c.delta >= 0 ? '+' : ''}${c.delta.toFixed(1)}%)` : ''}`).join(' | ')} |`);
   }
   const fresh = dg.fresh.map((f) => `${f.name} ${f.ageH == null ? '없음' : `${f.ageH.toFixed(f.name === 'quality_data' ? 1 : 0)}h`}`).join(' · ');
-  return `### 3사 대표 지표 순위 (최근 7일 평균)\n${lines.join('\n')}\n\n### 수집 신선도\n${fresh}`;
+  return `### 3사 대표 지표 순위 (${week ? `지난주 ${week.label} 평균 · 괄호는 전전주 대비` : '최근 7일 평균'})\n${lines.join('\n')}\n\n### 수집 신선도\n${fresh}`;
 }
 
-export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): string {
+export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number, week?: WeekWindow): string {
   const kst = new Date(now).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' });
   const fired = r.events.filter((e) => e.type === 'fire'), cleared = r.events.filter((e) => e.type === 'clear');
-  const out: string[] = [`# 품질 이상 알림 판정 — ${kst} KST`, ''];
+  const out: string[] = [`# ${week ? `주간 요약 (${week.label})` : '품질 이상 알림 판정'} — ${kst} KST`, ''];
+  if (week) { const ev = weekEvents(r.state, week); out.push(`## 지난주 이벤트 ${ev.length}건`); for (const e of ev) out.push(`- ${e.at.slice(0, 10)} ${e.type === 'fire' ? '발동' : '해소'} **${e.key}** — ${e.detail}`); if (!ev.length) out.push('- 없음'); out.push(''); }
   if (fired.length) { out.push(`## 🔴 신규 발동 ${fired.length}건`); for (const e of fired) out.push(`- **${e.key}** — ${e.detail}`); out.push(''); }
   if (cleared.length) { out.push(`## 🟢 해소 ${cleared.length}건`); for (const e of cleared) out.push(`- **${e.key}** — ${e.detail}`); out.push(''); }
   if (!r.events.length) out.push('## 신규 이벤트 없음', '');
@@ -299,7 +335,7 @@ export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: 
   out.push(`## 활성 알림 ${act.length}건`);
   for (const [k, a] of act) out.push(`- ${k} (since ${a.since.slice(0, 10)}) — ${a.detail}`);
   if (!act.length) out.push('- 없음');
-  out.push('', digest(data, cacheGeneratedAt, now), '', '<details><summary>판정 상세</summary>', '',
+  out.push('', digest(data, cacheGeneratedAt, now, week), '', '<details><summary>판정 상세</summary>', '',
     ...r.checks.map((c) => `- ${c.key} 최근값 ${fmt(c.value, c.unit)} (${c.date}) → ${c.met ? '충족' : '미충족'}${c.active ? ' [활성]' : ''}`), '', '</details>');
   return out.join('\n');
 }
@@ -314,11 +350,13 @@ const FONT = 'font-family:Malgun Gothic,Arial,sans-serif;';
 const GROUP_LABEL: Record<Check['group'], string> = { A: '사건 트리거 (A) — 구조 변화·장애', S: '속도 트리거 (S) — 28일 대비 하락', D: '운영 트리거 (D) — 수집 상태' };
 
 export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number,
-  opts: { runUrl?: string; test?: boolean } = {}): string {
+  opts: { runUrl?: string; test?: boolean; week?: WeekWindow } = {}): string {
   const kst = new Date(now).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16);
   const fired = r.events.filter((e) => e.type === 'fire'), cleared = r.events.filter((e) => e.type === 'clear');
   const act = Object.entries(r.state.active);
-  const dg = digestData(data, cacheGeneratedAt, now);
+  const week = opts.week;
+  const dg = digestData(data, cacheGeneratedAt, now, week);
+  const wev = week ? weekEvents(r.state, week) : [];
   const freshState = (f: DigestData['fresh'][number]) => f.ageH == null ? 'none' : f.ageH >= f.limitH ? 'over' : f.ageH >= f.limitH * 0.5 ? 'warn' : 'ok';
   const freshBad = dg.fresh.filter((f) => freshState(f) === 'over' || freshState(f) === 'none').length;
   const freshWarn = dg.fresh.filter((f) => freshState(f) === 'warn').length;
@@ -327,7 +365,9 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;color:${color};background:${bg};white-space:nowrap;${FONT}">${esc(text)}</span>`;
   const status = fired.length ? chip(`사건 ${fired.length}건`, C.bad, C.badSoft)
     : cleared.length ? chip(`해소 ${cleared.length}건`, C.good, C.goodSoft)
-    : act.length ? chip(`활성 알림 ${act.length}건 유지`, C.warn, C.warnSoft) : chip('이상 없음', C.good, C.goodSoft);
+    : act.length ? chip(`활성 알림 ${act.length}건 유지`, C.warn, C.warnSoft)
+    : week ? chip(wev.length ? `지난주 이벤트 ${wev.length}건` : '지난주 이상 없음', wev.length ? C.warn : C.good, wev.length ? C.warnSoft : C.goodSoft)
+    : chip('이상 없음', C.good, C.goodSoft);
   const tile = (num: string, lab: string, color: string) =>
     `<td width="25%" style="padding:0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-left:3px solid ${color};border-radius:6px">` +
     `<div style="font-size:21px;font-weight:700;color:${C.ink};${FONT}">${esc(num)}</div><div style="font-size:11px;color:${C.soft};${FONT}">${esc(lab)}</div></td></tr></table></td>`;
@@ -347,14 +387,19 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     : `<div style="font-size:12.5px;color:${C.soft};${FONT}">없음</div>`;
 
   // 3사 순위 매트릭스 — 종합지표 패널과 같은 색 규칙(1위 초록 · 꼴찌 빨강)
-  const rankCell = (c: RankCell, unit: string) => {
+  const rankCell = (c: RankCell, unit: string, hib: boolean) => {
     const bg = c.rank === 1 ? C.goodSoft : c.rank != null && c.rank === c.ranked && c.ranked > 1 ? C.badSoft : 'transparent';
     const col = c.rank === 1 ? C.good : c.rank != null && c.rank === c.ranked && c.ranked > 1 ? C.bad : C.soft;
+    // 전전주 대비 변화: 개선이면 초록, 악화면 빨강(지표 방향 반영). ±0.5% 미만은 회색 "보합".
+    const delta = c.delta == null ? '' : Math.abs(c.delta) < 0.5 ? `<div style="font-size:10.5px;color:${C.faint}">보합</div>`
+      : `<div style="font-size:10.5px;font-weight:700;color:${(c.delta > 0) === hib ? C.good : C.bad}">${c.delta > 0 ? '▲' : '▼'} ${Math.abs(c.delta).toFixed(1)}%</div>`;
     return td(`<span style="font-size:13px;font-weight:700;color:${C.ink}">${esc(fmt(round1(c.v), ''))}</span><span style="font-size:10.5px;color:${C.faint}"> ${esc(unit)}</span>` +
-      (c.rank != null ? `<span style="float:right;font-size:10.5px;font-weight:700;color:${col}">${c.rank}위</span>` : ''), `background:${bg};text-align:left`);
+      (c.rank != null ? `<span style="float:right;font-size:10.5px;font-weight:700;color:${col}">${c.rank}위</span>` : '') + delta, `background:${bg};text-align:left`);
   };
-  const ranksHtml = table(`<tr>${th('지표 (최근 7일 평균)')}${KR3.map((i) => th(ispName(i), 'text-align:left;width:22%')).join('')}</tr>` +
-    dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit)).join('')}</tr>`).join(''));
+  const ranksHtml = table(`<tr>${th(week ? `지표 (지난주 ${week.label} 평균)` : '지표 (최근 7일 평균)')}${KR3.map((i) => th(ispName(i), 'text-align:left;width:22%')).join('')}</tr>` +
+    dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit, m.hib)).join('')}</tr>`).join(''));
+  const weekEventsHtml = wev.length ? wev.map(eventCard).join('')
+    : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">지난주 발동·해소 이벤트 없음 — 트리거 전부 정상 범위였습니다.</div>`;
 
   // 수집 신선도
   const freshChip = (f: DigestData['fresh'][number]) => { const s = freshState(f); return s === 'ok' ? chip('정상', C.good, C.goodSoft) : s === 'warn' ? chip('주의', C.warn, C.warnSoft) : s === 'over' ? chip('허용 초과', C.bad, C.badSoft) : chip('파일 없음', C.bad, C.badSoft); };
@@ -373,14 +418,16 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ISPQ 알림</title></head>` +
     `<body style="margin:0;padding:0;background:${C.paper}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.paper}"><tr><td align="center" style="padding:20px 10px">` +
     `<table role="presentation" width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%">` +
-    `<tr><td style="padding:0 0 12px;border-bottom:3px solid ${C.accent}"><div style="font-size:11px;letter-spacing:.12em;color:${C.accent};font-weight:700;${FONT}">ISP 품질 대시보드 · 자동 알림${opts.test ? ' · 테스트 발송' : ''}</div>` +
-    `<div style="font-size:20px;font-weight:700;color:${C.ink};margin:4px 0 6px;${FONT}">품질 이상 알림 판정</div><div style="font-size:12px;color:${C.faint};${FONT}">${esc(kst)} KST &nbsp; ${status}</div></td></tr>` +
+    `<tr><td style="padding:0 0 12px;border-bottom:3px solid ${C.accent}"><div style="font-size:11px;letter-spacing:.12em;color:${C.accent};font-weight:700;${FONT}">ISP 품질 대시보드 · ${week ? '주간 요약' : '자동 알림'}${opts.test ? ' · 테스트 발송' : ''}</div>` +
+    `<div style="font-size:20px;font-weight:700;color:${C.ink};margin:4px 0 6px;${FONT}">${week ? `주간 요약 — 지난주 ${esc(week.label)}` : '품질 이상 알림 판정'}</div><div style="font-size:12px;color:${C.faint};${FONT}">${esc(kst)} KST &nbsp; ${status}</div></td></tr>` +
     `<tr><td style="padding:14px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>` +
-    tile(String(fired.length), '신규 발동', fired.length ? C.bad : C.accent) + tile(String(act.length), '활성 알림', act.length ? C.warn : C.accent) +
+    (week ? tile(String(wev.length), '지난주 이벤트', wev.length ? C.warn : C.accent) : tile(String(fired.length), '신규 발동', fired.length ? C.bad : C.accent)) +
+    tile(String(act.length), '활성 알림', act.length ? C.warn : C.accent) +
     tile(freshBad ? `${freshBad} 초과` : freshWarn ? `${freshWarn} 주의` : '정상', '수집 신선도', freshBad ? C.bad : freshWarn ? C.warn : C.good) + tile(String(r.checks.length), '판정 항목', C.accent) +
     `</tr></table></td></tr>` +
-    section('이벤트', eventsHtml) + section('활성 알림', activeHtml) +
-    section('국내 3사 대표 지표 순위', ranksHtml, '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
+    (week ? section(`지난주 이벤트 (${week.label})`, weekEventsHtml) + (r.events.length ? section('오늘 신규 이벤트', eventsHtml) : '') : section('이벤트', eventsHtml)) +
+    section('활성 알림', activeHtml) +
+    section('국내 3사 대표 지표 순위', ranksHtml, week ? `지난주 ${week.label} 일별 집계 평균 · 1위 초록 · 꼴찌 빨강 · 화살표는 전전주 대비 변화(초록=개선, 빨강=악화)` : '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
     section('수집 신선도', freshHtml) + section('트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +
     `<tr><td style="padding:18px 0 0;border-top:1px solid ${C.line};margin-top:18px;font-size:11px;color:${C.faint};${FONT}">${links} · 판정 규칙: 핸드오프 문서 §17 · 이 메일은 자동 발송됩니다</td></tr>` +
     `</table></td></tr></table></body></html>`;
@@ -399,23 +446,26 @@ async function main() {
   const cacheGeneratedAt: Record<string, string | null> = {};
   for (const n of CACHE_NAMES) cacheGeneratedAt[n] = (await readJson<{ generatedAt?: string }>(resolve(PUBLIC, `${n}_cache.json`)))?.generatedAt ?? null;
 
+  const weekly = process.env.ALERT_WEEKLY === 'true'; // 월요일 아침 크론(또는 수동 weekly) → 지난주 월~일 기준 요약
+  const week = weekly ? prevWeekWindow(now) : undefined;
   const r = evaluate({ data, cacheGeneratedAt, now, prev });
   await writeFile(STATE_FILE, JSON.stringify(r.state, null, 1));
-  const report = buildReport(r, data, cacheGeneratedAt, now);
+  const report = buildReport(r, data, cacheGeneratedAt, now, week);
   await writeFile(REPORT_FILE, report);
   const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
     ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined;
-  await writeFile(REPORT_HTML, buildMailHtml(r, data, cacheGeneratedAt, now, { runUrl, test: process.env.ALERT_TEST_MAIL === 'true' }));
+  await writeFile(REPORT_HTML, buildMailHtml(r, data, cacheGeneratedAt, now, { runUrl, test: process.env.ALERT_TEST_MAIL === 'true', week }));
   console.log(report);
 
-  // 워크플로 출력: 신규 이벤트 수 · 메일 제목 · KST 요일(1=월)
+  // 워크플로 출력: 신규 이벤트 수 · 주간 여부 · 메일 제목
   const fired = r.events.filter((e) => e.type === 'fire');
-  const weekday = new Date(new Date(now).toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getDay();
   const subject = fired.length
-    ? `[ISPQ 알림] ${fired.map((e) => e.key).join(', ')}`
-    : r.events.length ? `[ISPQ 해소] ${r.events.map((e) => e.key).join(', ')}` : `[ISPQ 주간 요약] 활성 알림 ${Object.keys(r.state.active).length}건`;
+    ? `[ISPQ 알림] ${fired.map((e) => e.key).join(', ')}${week ? ` · 주간 요약 ${week.label}` : ''}`
+    : r.events.length ? `[ISPQ 해소] ${r.events.map((e) => e.key).join(', ')}${week ? ` · 주간 요약 ${week.label}` : ''}`
+    : week ? `[ISPQ 주간 요약] ${week.label} · 이벤트 ${weekEvents(r.state, week).length}건 · 활성 ${Object.keys(r.state.active).length}건`
+    : `[ISPQ 판정] 이벤트 없음 · 활성 ${Object.keys(r.state.active).length}건`;
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, `new_events=${r.events.length}\nfired=${fired.length}\nweekday=${weekday}\nsubject=${subject}\nreport=${REPORT_FILE}\nreport_html=${REPORT_HTML}\n`);
+    await appendFile(process.env.GITHUB_OUTPUT, `new_events=${r.events.length}\nfired=${fired.length}\nweekly=${weekly}\nsubject=${subject}\nreport=${REPORT_FILE}\nreport_html=${REPORT_HTML}\n`);
   }
 }
 
