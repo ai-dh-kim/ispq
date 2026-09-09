@@ -13,7 +13,7 @@ import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ISP_BY_ID, NIA_NAME_BY_ID } from '../src/data/isps.ts';
-import { METRIC_BY_ID } from '../src/data/metrics.ts';
+import { METRIC_BY_ID, SOURCES } from '../src/data/metrics.ts';
 import { SUMMARY_METRICS, buildSummary } from '../src/lib/summary.ts';
 import type { QualityData } from '../src/types.ts';
 import { renderWeeklyCharts, type ChartSpec, type RenderedChart } from './weekly-charts.ts';
@@ -178,9 +178,14 @@ export interface EvalInput {
 // 판정 1건의 구조화 결과 — 보고서(markdown)와 메일(HTML 표) 양쪽이 이걸로 렌더링한다.
 export interface Check {
   key: string; group: 'A' | 'S' | 'D'; trigger: string; target: string; // target: ISP id 또는 캐시/출처 그룹명
+  metric: string; // 사람이 읽는 지표명 + 출처 — "IPv6 채택률 (Cloudflare Radar)" · D는 감시 대상 파일/출처
+  meaning: string; // 걸리면 무슨 상황인지 한 줄
   cond: string; value: number | null; unit: string; date: string; // 최근 유효값과 그 날짜(D는 경과시간·기준시각)
   met: boolean; active: boolean;
 }
+// '기타' 탭(etc)은 출처 3곳을 묶은 화면용 라벨이라 지표별 실제 제공처로 바꿔 표기.
+const PROVIDER_OVERRIDE: Record<string, string> = { dnssec: 'APNIC', steamDownload: 'Steam', nfSpeedIndex: 'Netflix' };
+const metricLabel = (id: string) => { const m = METRIC_BY_ID[id]; return m ? `${m.name} (${PROVIDER_OVERRIDE[id] ?? SOURCES[m.source]?.label ?? m.source})` : id; };
 export interface EvalResult { state: AlertState; events: AlertEvent[]; checks: Check[] }
 
 const condText = (r: Rule, unit: string) =>
@@ -214,7 +219,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
         } else if (active[key] && off.none && off.last) {
           clear(key, off.last.v, `${ispName(isp)} ${mname} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
         }
-        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, cond: condText(r, unit),
+        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, metric: metricLabel(trg.metric), meaning: r.meaning, cond: condText(r, unit),
           value: lastV, unit, date: pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음', met: on.all, active: !!active[key] });
       }
     }
@@ -226,7 +231,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
     const ageH = (now - Date.parse(data.generatedAt)) / HOUR;
     if (!active[key] && ageH >= D1A_HOURS) fire(key, { trigger: 'D1-a', target: 'quality_data', since: data.generatedAt, value: Math.round(ageH), detail: `quality_data.json 이 ${ageH.toFixed(0)}시간 미갱신 — Refresh 워크플로 정지 의심(GitHub 장애·Cloudflare 토큰 만료)` });
     else if (active[key] && ageH < D1A_HOURS) clear(key, Math.round(ageH), `quality_data.json 갱신 재개(${ageH.toFixed(1)}h 전)`);
-    checks.push({ key, group: 'D', trigger: 'D1-a', target: 'quality_data', cond: `${D1A_HOURS}h 이상 미갱신`, value: Math.round(ageH * 10) / 10, unit: 'h',
+    checks.push({ key, group: 'D', trigger: 'D1-a', target: 'quality_data', metric: 'quality_data.json 갱신 시각 (10분 Refresh)', meaning: 'Refresh 워크플로 정지 — GitHub 장애·Cloudflare 토큰 만료', cond: `${D1A_HOURS}h 이상 미갱신`, value: Math.round(ageH * 10) / 10, unit: 'h',
       date: data.generatedAt.slice(0, 16).replace('T', ' ') + 'Z', met: ageH >= D1A_HOURS, active: !!active[key] });
   }
 
@@ -237,7 +242,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
     const ageH = g ? (now - Date.parse(g)) / HOUR : Infinity;
     if (!active[key] && ageH >= D1B_HOURS) fire(key, { trigger: 'D1-b', target: name, since: g ?? nowIso, value: Number.isFinite(ageH) ? Math.round(ageH) : null, detail: `${name}_cache.json 이 ${Number.isFinite(ageH) ? `${(ageH / 24).toFixed(1)}일` : '기록 없음'} 미갱신 — 수집기 정지·API 규격 변경·엔드포인트 차단 의심` });
     else if (active[key] && ageH < D1B_HOURS) clear(key, Math.round(ageH), `${name} 수집 재개(${ageH.toFixed(1)}h 전)`);
-    checks.push({ key, group: 'D', trigger: 'D1-b', target: name, cond: `${D1B_HOURS}h 이상 미갱신`, value: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, unit: 'h',
+    checks.push({ key, group: 'D', trigger: 'D1-b', target: name, metric: `${name}_cache.json 갱신 시각 (일별 수집)`, meaning: '해당 수집기 정지 — API 규격 변경·엔드포인트 차단', cond: `${D1B_HOURS}h 이상 미갱신`, value: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, unit: 'h',
       date: g ? g.slice(0, 16).replace('T', ' ') + 'Z' : '파일 없음', met: ageH >= D1B_HOURS, active: !!active[key] });
   }
 
@@ -261,7 +266,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
     }
     if (!active[key] && stale) fire(key, { trigger: 'D2', target: group, since: dayKey(seg[0].t), value: null, detail: `${group} 출처의 전 사업자·전 값이 ${D2_DAYS}일 연속(${dayKey(seg[0].t)}~${dayKey(seg[seg.length - 1].t)}) 완전 동일 — 수집은 성공하나 공급처가 새 값을 내놓지 않음` });
     else if (active[key] && !stale) clear(key, null, `${group} 출처 값 변동 재개`);
-    checks.push({ key, group: 'D', trigger: 'D2', target: group, cond: `전 사업자·전 값 ${D2_DAYS}일 연속 동일`, value: null, unit: '',
+    checks.push({ key, group: 'D', trigger: 'D2', target: group, metric: `${group} 출처의 전 사업자 일별 값`, meaning: '수집은 성공하나 공급처가 새 값을 내놓지 않음(원본 정체)', cond: `전 사업자·전 값 ${D2_DAYS}일 연속 동일`, value: null, unit: '',
       date: seg.length ? `${dayKey(seg[0].t)}~${dayKey(seg[seg.length - 1].t).slice(5)}` : '데이터 없음', met: stale, active: !!active[key] });
   }
 
@@ -346,7 +351,7 @@ export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: 
   for (const [k, a] of act) out.push(`- ${k} (since ${a.since.slice(0, 10)}) — ${a.detail}`);
   if (!act.length) out.push('- 없음');
   out.push('', digest(data, cacheGeneratedAt, now, week), '', '<details><summary>판정 상세</summary>', '',
-    ...r.checks.map((c) => `- ${c.key} 최근값 ${fmt(c.value, c.unit)} (${c.date}) → ${c.met ? '충족' : '미충족'}${c.active ? ' [활성]' : ''}`), '', '</details>');
+    ...r.checks.map((c) => `- ${c.key} · ${c.metric} · ${c.group === 'D' ? c.target : ispName(c.target)} — 최근값 ${fmt(c.value, c.unit)} (${c.date}) → ${c.met ? '충족' : '미충족'}${c.active ? ' [활성]' : ''}`), '', '</details>');
   return out.join('\n');
 }
 
@@ -422,9 +427,11 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
   // 트리거 판정 현황
   const stateChip = (c: Check) => c.active ? chip('발동 중', C.bad, C.badSoft) : c.met ? chip('충족', C.warn, C.warnSoft) : chip('정상', C.ops, C.opsSoft);
   const groups: Check['group'][] = ['A', 'S', 'D'];
-  const checksHtml = table(`<tr>${th('트리거')}${th('대상')}${th('조건')}${th('최근값', 'text-align:right')}${th('기준일')}${th('상태')}</tr>` +
+  // 한 행 = "A1 · IPv6 채택률 (Cloudflare Radar)" / KT / 조건 + 의미 한 줄 / 최근값 / 기준일 / 상태 — ID만으론 무슨 지표인지 안 보여서(2026-09-09) 지표명·의미를 같이 표기.
+  const checksHtml = table(`<tr>${th('트리거 · 지표', 'width:27%')}${th('대상', 'width:11%')}${th('조건 · 걸리면 이런 상황', 'width:36%')}${th('최근값', 'text-align:right;width:9%')}${th('기준일', 'width:10%')}${th('상태', 'width:7%')}</tr>` +
     groups.map((g) => `<tr><td colspan="6" style="padding:6px 10px;font-size:11px;font-weight:700;color:${C.accent};background:${C.accentSoft};${FONT}">${esc(GROUP_LABEL[g])}</td></tr>` +
-      r.checks.filter((c) => c.group === g).map((c) => `<tr>${td(`<b>${esc(c.trigger)}</b>`, 'white-space:nowrap')}${td(esc(c.group === 'D' ? c.target : ispName(c.target)), 'white-space:nowrap')}${td(`<span style="color:${C.soft};font-size:11.5px">${esc(c.cond)}</span>`)}` +
+      r.checks.filter((c) => c.group === g).map((c) => `<tr>${td(`<b style="color:${C.accent}">${esc(c.trigger)}</b> · <b>${esc(c.metric)}</b>`)}${td(esc(c.group === 'D' ? c.target : ispName(c.target)), 'white-space:nowrap')}` +
+        `${td(`${esc(c.cond)}<div style="color:${C.faint};font-size:11px">${esc(c.meaning)}</div>`, 'font-size:11.5px;color:' + C.soft)}` +
         `${td(esc(fmt(c.value, c.unit)), 'text-align:right;white-space:nowrap')}${td(`<span style="color:${C.faint};font-size:11px">${esc(c.date)}</span>`, 'white-space:nowrap')}${td(stateChip(c))}</tr>`).join('')).join(''));
 
   const links = `<a href="${DASHBOARD_URL}" style="color:${C.accent};text-decoration:none">대시보드 열기</a>` + (opts.runUrl ? ` · <a href="${esc(opts.runUrl)}" style="color:${C.accent};text-decoration:none">판정 실행 로그</a>` : '');

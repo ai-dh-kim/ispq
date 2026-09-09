@@ -119,7 +119,9 @@ async function main() {
   { const html = buildMailHtml(base, real, caches, now, { runUrl: 'https://example/run/1' });
     ok(html.includes('국내 3사 대표 지표 순위') && html.includes('A1') && html.includes('D2') && html.includes('이상 없음') && html.includes('example/run/1'), 'HTML 메일: 순위·판정 현황·상태·링크 포함');
     ok(!html.includes('<style') && !/display:\s*(flex|grid)/.test(html), 'HTML 메일: <style>·flex·grid 미사용(메일 클라이언트 호환)');
-    const md = buildReport(base, real, caches, now); ok(md.includes('| 지표 | 1위 |') && md.includes('A1:kt:rise 최근값'), 'markdown 보고서: 표·판정 상세 포함'); }
+    const md = buildReport(base, real, caches, now); ok(md.includes('| 지표 | 1위 |') && md.includes('A1:kt:rise · IPv6 채택률 (Cloudflare Radar) · KT — 최근값'), 'markdown 보고서: 표·판정 상세(지표명·대상) 포함');
+    ok(html.includes('IPv6 채택률 (Cloudflare Radar)') && html.includes('유선 IPv6 서비스 개시 신호') && html.includes('quality_data.json 갱신 시각') && html.includes('트리거 · 지표'), 'HTML 판정 현황: 지표명·의미·D 대상 표기');
+    ok(base.checks.every((c) => c.metric && c.meaning), '모든 판정 항목에 지표명·의미 존재'); }
   { const d = clone(real); patchTail(d, 'kt', 'ipv6', 3, () => 5); const rr = run(d);
     const html = buildMailHtml(rr, d, caches, now, { test: true });
     ok(html.includes('신규 발동') && html.includes('A1:kt:rise') && html.includes('테스트 발송') && html.includes('발동 중'), 'HTML 메일: 발동 카드·활성 상태·테스트 표기'); }
