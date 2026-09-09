@@ -35,7 +35,7 @@ const D2_DAYS = 3; // 전 사업자·전 값 완전 동일 연속 일수
 const D2_MIN_VALUES = 5; // D2 판정에 필요한 최소 non-null 값 수(케이블사 결측 등 감안)
 
 // ---- 트리거 정의 (§17 표와 1:1) ----
-type Cmp = 'gte' | 'lte' | 'gt0' | 'rise_pp';
+type Cmp = 'gte' | 'lte' | 'gt0' | 'rise_pp' | 'drop_pct';
 interface Rule { key: string; cmp: Cmp; th: number; days: number; meaning: string }
 export interface Trigger {
   id: string;
@@ -60,6 +60,16 @@ export const TRIGGERS: Trigger[] = [
     rules: [{ key: 'rise', cmp: 'rise_pp', th: 10, days: 3, meaning: 'RPKI 라우팅 경로 인증 적용 — 평소 한 자릿수에서 거의 고정' }] },
   { id: 'A6', metric: 'packetLoss', isps: KR3,
     rules: [{ key: 'loss', cmp: 'gt0', th: 0, days: 2, meaning: '실제 패킷 손실 발생 — 3사 모두 88일 연속 0.000' }] },
+  // S: 속도 저하(2026-09-09 추가). 사업자별 수준이 달라 절대 바닥 대신 '자기 직전 28일 중앙값 대비 하락률'.
+  // 다운로드는 접점(Speed Test)·망 내부(NIA) 두 지점 — 동시 발동이면 망 문제, S1만이면 접점·단말, S3만이면 망 내부.
+  { id: 'S1', metric: 'downloadBandwidth', isps: KR3,
+    rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '이용자 실측 다운로드 저하(국내 접점) — 140일 최대 하락 4.4%' }] },
+  { id: 'S2', metric: 'uploadBandwidth', isps: KR3,
+    rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '이용자 실측 업로드 저하(국내 접점) — 140일 최대 하락 3.1%' }] },
+  { id: 'S3', metric: 'niaDl1g', isps: KR3,
+    rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '정부 측정 1G 다운로드 저하(망 내부) — 43일 최대 하락 6.2%' }] },
+  { id: 'S4', metric: 'niaUl1g', isps: KR3,
+    rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '정부 측정 1G 업로드 저하(망 내부) — 43일 최대 하락 5.5%' }] },
 ];
 
 // D2 대상: 일별 스냅샷으로 축적되는 출처 그룹(값이 3일 연속 완전 동일하면 원본 정체).
@@ -134,6 +144,7 @@ function holds(p: Pt, r: Rule): boolean | null {
     case 'lte': return p.v <= r.th;
     case 'gt0': return p.v > 0;
     case 'rise_pp': return p.base == null ? null : p.v - p.base >= r.th; // 기준선 없으면 판정 불가
+    case 'drop_pct': return p.base == null || p.base <= 0 ? null : ((p.base - p.v) / p.base) * 100 >= r.th;
   }
 }
 
@@ -175,7 +186,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
         checks.push(`${key} 최근값 ${fmt(lastV, unit)} (${pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음'}) → ${on.all ? '충족' : '미충족'}${active[key] ? ' [활성]' : ''}`);
         if (!active[key] && on.all && on.last && on.first) {
           fire(key, { trigger: trg.id, target: isp, since: dayKey(on.first.t), value: on.last.v,
-            detail: `${ispName(isp)} ${METRIC_BY_ID[trg.metric]?.name ?? trg.metric} ${fmt(on.last.v, unit)} — ${r.days}일 연속 ${r.cmp === 'rise_pp' ? `28일 중앙값 대비 +${r.th}%p 이상` : r.cmp === 'gt0' ? '0 초과' : `${r.cmp === 'gte' ? '≥' : '≤'} ${r.th}${unit}`}. ${r.meaning}` });
+            detail: `${ispName(isp)} ${METRIC_BY_ID[trg.metric]?.name ?? trg.metric} ${fmt(on.last.v, unit)} — ${r.days}일 연속 ${r.cmp === 'rise_pp' ? `28일 중앙값 대비 +${r.th}%p 이상` : r.cmp === 'drop_pct' ? `28일 중앙값 대비 -${r.th}% 이상 하락` : r.cmp === 'gt0' ? '0 초과' : `${r.cmp === 'gte' ? '≥' : '≤'} ${r.th}${unit}`}. ${r.meaning}` });
         } else if (active[key] && off.none && off.last) {
           clear(key, off.last.v, `${ispName(isp)} ${METRIC_BY_ID[trg.metric]?.name ?? trg.metric} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
         }

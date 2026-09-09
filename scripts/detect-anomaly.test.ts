@@ -45,6 +45,10 @@ async function main() {
     { key: 'A4:skb:drop', mutate: (d) => patchTail(d, 'skb', 'dnssec', 7, () => 20) },
     { key: 'A5:lgu:rise', mutate: (d) => { const b = median(d.series.lgu.rpkiValid.coarse[0].filter((x): x is number => x != null).slice(-31, -3)); patchTail(d, 'lgu', 'rpkiValid', 3, () => b + 12); } },
     { key: 'A6:kt:loss', mutate: (d) => patchTail(d, 'kt', 'packetLoss', 2, () => 0.4) },
+    { key: 'S1:kt:drop', mutate: (d) => patchTail(d, 'kt', 'downloadBandwidth', 3, (v) => v * 0.85) },
+    { key: 'S2:skb:drop', mutate: (d) => patchTail(d, 'skb', 'uploadBandwidth', 3, (v) => v * 0.85) },
+    { key: 'S3:lgu:drop', mutate: (d) => patchTail(d, 'lgu', 'niaDl1g', 3, (v) => v * 0.85) },
+    { key: 'S4:kt:drop', mutate: (d) => patchTail(d, 'kt', 'niaUl1g', 3, (v) => v * 0.85) },
   ];
   for (const c of cases) {
     const d = clone(real); c.mutate(d);
@@ -63,6 +67,8 @@ async function main() {
     ok(run(d).events.length === 0, 'A3 저표본일 제외 → 미발동');
   }
   { const d = clone(real); patchTail(d, 'lgu', 'ipv6', 7, () => 12); ok(run(d).events.length === 0, 'A2 하락 12% → 미발동 (임계 10)'); }
+  { const d = clone(real); patchTail(d, 'kt', 'downloadBandwidth', 3, (v) => v * 0.93); ok(run(d).events.length === 0, 'S1 -7% → 미발동 (임계 -10%)'); }
+  { const d = clone(real); patchTail(d, 'kt', 'downloadBandwidth', 2, (v) => v * 0.8); ok(run(d).events.length === 0, 'S1 -20% 2일만 → 미발동 (3일 연속 필요)'); }
 
   console.log('\n[4] 1회 발송 원칙 + 해소');
   { const d = clone(real); patchTail(d, 'kt', 'ipv6', 3, () => 5);
