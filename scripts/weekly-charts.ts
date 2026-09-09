@@ -15,7 +15,7 @@ const DAY = 86400000;
 // src/theme.ts BRAND_COLORS 와 동일(그 모듈은 브라우저 저장소를 만지므로 Node에서 import하지 않고 값만 복제).
 const ISP_COLOR: Record<string, string> = { kt: '#00BEAC', skb: '#3617CE', lgu: '#E5007A' };
 const ISP_LABEL: Record<string, string> = { kt: 'KT', skb: 'SKB', lgu: 'LG U+' };
-export const CHART_ISPS = ['kt', 'skb', 'lgu'];
+export const CHART_ISPS = ['lgu', 'kt', 'skb']; // 패널 순서: LG U+ 맨 앞(2026-09-09 사용자 지정)
 const WEEK_STYLE = [ // [0]=지난주 [1]=1주 전 [2]=2주 전
   { opacity: 1, width: 4, dots: true },
   { opacity: 0.45, width: 3, dots: false },
