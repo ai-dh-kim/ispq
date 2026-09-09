@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, chartGuides, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
 import { extractSeries, weeklyChartSvg, svgToPng, renderWeeklyCharts } from './weekly-charts.ts';
 import { tmpdir } from 'node:os';
 import type { QualityData } from '../src/types.ts';
@@ -164,7 +164,23 @@ async function main() {
     const charts = await renderWeeklyCharts(real, w.from, [{ id: 'latency', short: 'RTT', unit: 'ms' }, { id: 'ipv6', short: 'IPv6', unit: '%' }], dir);
     ok(charts.length === 2 && charts.every((c) => c.bytes > 1000 && c.file.startsWith('weekly-')), `renderWeeklyCharts: ${charts.map((c) => `${c.file} ${(c.bytes / 1024).toFixed(0)}KB`).join(', ')}`);
     const html = buildMailHtml(base, real, caches, now, { week: w, charts, chartBase: 'https://x/y' });
-    ok(html.includes('지난주 일별 추이') && html.includes('https://x/y/weekly-latency.png') && html.includes('<img '), 'HTML 주간 메일: 추이 섹션 + 차트 URL'); }
+    ok(html.includes('지표별 지난주 추이 + 트리거 판정') && html.includes('https://x/y/weekly-latency.png') && html.includes('<img '), 'HTML 주간 메일: 추이 섹션 + 차트 URL');
+    // 차트↔판정 연계: ipv6 카드 안에 A1·A2 행이, latency 카드엔 "트리거 없음"이, A/S 행은 카드 밖 표에 중복되지 않음
+    const ipv6Card = html.slice(html.indexOf('weekly-ipv6.png'), html.indexOf('weekly-ipv6.png') + 6000);
+    ok(ipv6Card.includes('>A1<') && ipv6Card.includes('>A2<') && ipv6Card.includes('≥ 1% · 3일 연속') && (ipv6Card.match(/>—</g) ?? []).length === 5, 'IPv6 카드에 A1·A2 규칙 행(3행) · 미대상 ISP 셀 5개 — (A1: LGU / A2 상승·하락: KT·SKB)');
+    ok(html.length < 95 * 1024, `주간 HTML ${(html.length / 1024).toFixed(0)}KB < 95KB (Gmail 102KB 클립 여유)`);
+    ok(html.includes('트리거 없음 · 순위 비교용') && html.includes('운영 트리거 판정 현황') && (html.match(/IPv6 채택률 \(Cloudflare Radar\)/g) ?? []).length <= 1, 'RTT 카드 "트리거 없음" · 카드 밖 표는 D만');
+    const g = chartGuides(real, w);
+    ok(g.ipv6?.some((x) => x.isp === 'kt' && x.y === 1 && x.label === 'A1 ≥ 1') && g.ipv6?.filter((x) => x.isp === 'lgu').length === 2, `임계선: ipv6 KT 1% · LGU 2개 (${g.ipv6?.map((x) => `${x.isp}:${x.label}`).join(' ')})`);
+    const s1 = g.downloadBandwidth?.find((x) => x.isp === 'kt');
+    ok(!!s1 && s1.y > 200 && s1.y < 300 && s1.label === 'S1 -10%', `상대 임계 환산: S1 KT 기준선×0.9 = ${s1?.y.toFixed(1)}`);
+    const svgG = weeklyChartSvg(ser, ['a', 'b', 'c', 'd', 'e', 'f', 'g'], 'Mbps', g.downloadBandwidth ?? []);
+    ok((svgG.match(/stroke-dasharray/g) ?? []).length === 3 && svgG.includes('S1 -10%'), '차트에 임계 점선 3개(3사) + 라벨');
+    const svgIpv6 = weeklyChartSvg(extractSeries(real, 'ipv6', w.from), ['a', 'b', 'c', 'd', 'e', 'f', 'g'], '%', g.ipv6 ?? []);
+    ok(svgIpv6.includes('(own scale)') && !svgG.includes('(own scale)'), 'IPv6(수준 1000배 차)는 패널별 눈금, 다운로드는 공유 눈금');
+    // 라벨에 ≤ 같은 특수문자·이스케이프 대상이 있어도 PNG 변환이 깨지지 않아야 함(2026-09-09 '<=' 로 XML 파싱 실패했던 회귀)
+    const pngG = svgToPng(weeklyChartSvg(extractSeries(real, 'ipv6', w.from), ['a', 'b', 'c', 'd', 'e', 'f', 'g'], '%', [...(g.ipv6 ?? []), { isp: 'kt', y: 0.5, label: 'x <= 1 & y' }]));
+    ok(pngG.length > 2000 && pngG[0] === 0x89, `임계 라벨(≤·<·&) 포함 PNG 변환 ${(pngG.length / 1024).toFixed(0)}KB`); }
 
   console.log('\n[9] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');

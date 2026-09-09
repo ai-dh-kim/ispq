@@ -16,7 +16,7 @@ import { ISP_BY_ID, NIA_NAME_BY_ID } from '../src/data/isps.ts';
 import { METRIC_BY_ID, SOURCES } from '../src/data/metrics.ts';
 import { SUMMARY_METRICS, buildSummary } from '../src/lib/summary.ts';
 import type { QualityData } from '../src/types.ts';
-import { renderWeeklyCharts, type ChartSpec, type RenderedChart } from './weekly-charts.ts';
+import { renderWeeklyCharts, CHART_ISPS, type ChartSpec, type RenderedChart, type Guide } from './weekly-charts.ts';
 
 const HOUR = 3600000;
 const DAY = 24 * HOUR;
@@ -179,6 +179,7 @@ export interface EvalInput {
 export interface Check {
   key: string; group: 'A' | 'S' | 'D'; trigger: string; target: string; // target: ISP id 또는 캐시/출처 그룹명
   metric: string; // 사람이 읽는 지표명 + 출처 — "IPv6 채택률 (Cloudflare Radar)" · D는 감시 대상 파일/출처
+  metricId?: string; // A/S만 — 주간 메일에서 같은 지표의 차트 아래에 묶기 위한 키
   meaning: string; // 걸리면 무슨 상황인지 한 줄
   cond: string; value: number | null; unit: string; date: string; // 최근 유효값과 그 날짜(D는 경과시간·기준시각)
   met: boolean; active: boolean;
@@ -219,7 +220,7 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
         } else if (active[key] && off.none && off.last) {
           clear(key, off.last.v, `${ispName(isp)} ${mname} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
         }
-        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, metric: metricLabel(trg.metric), meaning: r.meaning, cond: condText(r, unit),
+        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, metric: metricLabel(trg.metric), metricId: trg.metric, meaning: r.meaning, cond: condText(r, unit),
           value: lastV, unit, date: pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음', met: on.all, active: !!active[key] });
       }
     }
@@ -324,6 +325,29 @@ export function digestData(data: QualityData, cacheGeneratedAt: Record<string, s
   return { ranks, fresh, week };
 }
 const round1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
+
+// 차트 임계선: 트리거 규칙을 지표별·ISP별 y값으로. 상대 규칙(rise_pp·drop_pct)은 주 마지막 날 기준 직전 28일 중앙값으로 환산.
+export function chartGuides(data: QualityData, week: WeekWindow): Record<string, Guide[]> {
+  const out: Record<string, Guide[]> = {};
+  const baseline = (isp: string, metric: string): number | null => {
+    const v = data.series[isp]?.[metric]?.coarse?.[0]; if (!v) return null;
+    const axis = data.tiers.coarse.t; const h: number[] = [];
+    for (let i = 0; i < axis.length; i++) { const x = v[i]; if (x != null && axis[i] >= week.to - BASE_DAYS * DAY && axis[i] < week.to) h.push(x); }
+    return h.length >= 14 ? med(h) : null;
+  };
+  for (const trg of TRIGGERS) for (const isp of trg.isps) for (const r of trg.rules) {
+    let y: number | null = null, label = '';
+    switch (r.cmp) {
+      case 'gte': y = r.th; label = `${trg.id} ≥ ${r.th}`; break; // ≥/≤ 는 DejaVu·Arial 모두 있음(차트 폰트)
+      case 'lte': y = r.th; label = `${trg.id} ≤ ${r.th}`; break;
+      case 'gt0': y = 0; label = `${trg.id} > 0`; break;
+      case 'rise_pp': { const b = baseline(isp, trg.metric); if (b != null) { y = b + r.th; label = `${trg.id} +${r.th}pp`; } break; }
+      case 'drop_pct': { const b = baseline(isp, trg.metric); if (b != null) { y = b * (1 - r.th / 100); label = `${trg.id} -${r.th}%`; } break; }
+    }
+    if (y != null) (out[trg.metric] ??= []).push({ isp, y, label });
+  }
+  return out;
+}
 const weekEvents = (state: AlertState, week: WeekWindow) => state.history.filter((e) => { const t = Date.parse(e.at) + 9 * HOUR; return t >= week.from && t < week.to; });
 
 // Step Summary(markdown)용
@@ -415,24 +439,41 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit, m.hib)).join('')}</tr>`).join(''));
   const weekEventsHtml = wev.length ? wev.map(eventCard).join('')
     : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">지난주 발동·해소 이벤트 없음 — 트리거 전부 정상 범위였습니다.</div>`;
-  // 일별 추이 차트 — 주간 평균이 지우는 '하루 튐'을 선으로 되살린다. 1·2주 전을 겹쳐 반복 패턴(주말 효과)과 이탈을 구분.
-  const chartsHtml = (opts.charts ?? []).map((c) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr><td style="padding:0 0 4px;font-size:12.5px;font-weight:700;color:${C.ink};${FONT}">${esc(c.short)}</td></tr>` +
-    `<tr><td><img src="${esc(`${opts.chartBase ?? CHART_BASE}/${c.file}`)}" width="640" height="125" alt="${esc(c.short)} 지난주 일별 추이" style="display:block;width:100%;max-width:640px;height:auto;border:0"></td></tr></table>`).join('');
+  // 판정 행 렌더러 — 전체 표(일별 메일)와 지표 카드(주간 메일) 양쪽에서 씀. withMetric=false 면 지표명 열을 생략(카드 제목에 이미 있음).
+  const stateChip = (c: Check) => c.active ? chip('발동 중', C.bad, C.badSoft) : c.met ? chip('충족', C.warn, C.warnSoft) : chip('정상', C.ops, C.opsSoft);
+  const checkRow = (c: Check, withMetric: boolean) => `<tr>${td(withMetric ? `<b style="color:${C.accent}">${esc(c.trigger)}</b> · <b>${esc(c.metric)}</b>` : `<b style="color:${C.accent}">${esc(c.trigger)}</b>`, withMetric ? '' : 'white-space:nowrap')}` +
+    `${td(esc(c.group === 'D' ? c.target : ispName(c.target)), 'white-space:nowrap')}${td(`${esc(c.cond)}<div style="color:${C.faint};font-size:11px">${esc(c.meaning)}</div>`, 'font-size:11.5px;color:' + C.soft)}` +
+    `${td(esc(fmt(c.value, c.unit)), 'text-align:right;white-space:nowrap')}${td(`<span style="color:${C.faint};font-size:11px">${esc(c.date)}</span>`, 'white-space:nowrap')}${td(stateChip(c))}</tr>`;
+  // 지표 카드(주간) — 차트 + 그 지표의 A/S 판정. 규칙당 1행, 열은 차트 패널과 같은 순서(LG U+ · KT · SKB)라 점선↔셀이 바로 대응된다.
+  // (ISP별 행으로 풀면 조건·의미가 3번 반복돼 본문이 Gmail 102KB 한도에 닿았음 — 2026-09-09)
+  const tdc = (html: string, extra = '') => `<td style="padding:6px 8px;font-size:12px;border-bottom:1px solid ${C.line};${FONT}${extra}">${html}</td>`;
+  const metricCards = (opts.charts ?? []).map((c) => {
+    const rows = r.checks.filter((k) => k.metricId === c.id);
+    const rules = [...new Map(rows.map((k) => [`${k.trigger}:${k.key.split(':')[2]}`, k])).entries()]; // 규칙 대표 행
+    const ids = [...new Set(rows.map((k) => k.trigger))];
+    const head = `<tr><td style="padding:0 0 6px;${FONT}"><span style="font-size:13.5px;font-weight:700;color:${C.ink}">${esc(c.short)}</span> ` +
+      (ids.length ? ids.map((id) => chip(id, C.accent, C.accentSoft)).join(' ') : `<span style="font-size:11px;color:${C.faint}">트리거 없음 · 순위 비교용</span>`) +
+      (rows.some((k) => k.active) ? ' ' + chip('발동 중', C.bad, C.badSoft) : '') + `</td></tr>`;
+    const img = `<tr><td><img src="${esc(`${opts.chartBase ?? CHART_BASE}/${c.file}`)}" width="640" height="125" alt="${esc(c.short)} 지난주 일별 추이" style="display:block;width:100%;max-width:640px;height:auto;border:0"></td></tr>`;
+    const cell = (k: Check | undefined) => !k ? tdc(`<span style="color:${C.faint}">—</span>`, 'text-align:center')
+      : tdc(`<b style="color:${C.ink}">${esc(fmt(k.value, k.unit))}</b> ${stateChip(k)}<div style="font-size:10.5px;color:${C.faint}">${esc(k.date)}</div>`, 'white-space:nowrap');
+    const tbl = rules.length ? `<tr><td style="padding:6px 0 0">${table(`<tr>${th('트리거', 'width:8%')}${th('조건 (차트 점선) · 걸리면 이런 상황', 'width:41%')}${CHART_ISPS.map((i) => th(ispName(i), 'width:17%')).join('')}</tr>` +
+      rules.map(([rk, k0]) => `<tr>${tdc(`<b style="color:${C.accent}">${esc(k0.trigger)}</b>`, 'white-space:nowrap')}${tdc(`<span style="color:${C.soft}">${esc(k0.cond)}</span><div style="color:${C.faint};font-size:10.5px">${esc(k0.meaning)}</div>`, 'font-size:11.5px')}` +
+        CHART_ISPS.map((isp) => cell(rows.find((k) => k.target === isp && `${k.trigger}:${k.key.split(':')[2]}` === rk))).join('') + '</tr>').join(''))}</td></tr>` : '';
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;padding:10px 12px;background:${C.card2};border:1px solid ${C.line};border-radius:8px">${head}${img}${tbl}</table>`;
+  }).join('');
 
   // 수집 신선도
   const freshChip = (f: DigestData['fresh'][number]) => { const s = freshState(f); return s === 'ok' ? chip('정상', C.good, C.goodSoft) : s === 'warn' ? chip('주의', C.warn, C.warnSoft) : s === 'over' ? chip('허용 초과', C.bad, C.badSoft) : chip('파일 없음', C.bad, C.badSoft); };
   const freshHtml = table(`<tr>${th('출처')}${th('마지막 갱신', 'text-align:right')}${th('허용', 'text-align:right')}${th('상태')}</tr>` +
     dg.fresh.map((f) => `<tr>${td(esc(f.name))}${td(f.ageH == null ? '–' : `${f.ageH.toFixed(1)}h 전`, 'text-align:right;white-space:nowrap')}${td(`${f.limitH}h`, 'text-align:right;color:' + C.faint)}${td(freshChip(f))}</tr>`).join(''));
 
-  // 트리거 판정 현황
-  const stateChip = (c: Check) => c.active ? chip('발동 중', C.bad, C.badSoft) : c.met ? chip('충족', C.warn, C.warnSoft) : chip('정상', C.ops, C.opsSoft);
-  const groups: Check['group'][] = ['A', 'S', 'D'];
+  // 트리거 판정 현황 — 주간 메일에선 A/S가 지표 카드로 올라가므로 D만, 일별 메일에선 전체.
   // 한 행 = "A1 · IPv6 채택률 (Cloudflare Radar)" / KT / 조건 + 의미 한 줄 / 최근값 / 기준일 / 상태 — ID만으론 무슨 지표인지 안 보여서(2026-09-09) 지표명·의미를 같이 표기.
+  const tableGroups: Check['group'][] = week && opts.charts?.length ? ['D'] : ['A', 'S', 'D'];
   const checksHtml = table(`<tr>${th('트리거 · 지표', 'width:27%')}${th('대상', 'width:11%')}${th('조건 · 걸리면 이런 상황', 'width:36%')}${th('최근값', 'text-align:right;width:9%')}${th('기준일', 'width:10%')}${th('상태', 'width:7%')}</tr>` +
-    groups.map((g) => `<tr><td colspan="6" style="padding:6px 10px;font-size:11px;font-weight:700;color:${C.accent};background:${C.accentSoft};${FONT}">${esc(GROUP_LABEL[g])}</td></tr>` +
-      r.checks.filter((c) => c.group === g).map((c) => `<tr>${td(`<b style="color:${C.accent}">${esc(c.trigger)}</b> · <b>${esc(c.metric)}</b>`)}${td(esc(c.group === 'D' ? c.target : ispName(c.target)), 'white-space:nowrap')}` +
-        `${td(`${esc(c.cond)}<div style="color:${C.faint};font-size:11px">${esc(c.meaning)}</div>`, 'font-size:11.5px;color:' + C.soft)}` +
-        `${td(esc(fmt(c.value, c.unit)), 'text-align:right;white-space:nowrap')}${td(`<span style="color:${C.faint};font-size:11px">${esc(c.date)}</span>`, 'white-space:nowrap')}${td(stateChip(c))}</tr>`).join('')).join(''));
+    tableGroups.map((g) => `<tr><td colspan="6" style="padding:6px 10px;font-size:11px;font-weight:700;color:${C.accent};background:${C.accentSoft};${FONT}">${esc(GROUP_LABEL[g])}</td></tr>` +
+      r.checks.filter((c) => c.group === g).map((c) => checkRow(c, true)).join('')).join(''));
 
   const links = `<a href="${DASHBOARD_URL}" style="color:${C.accent};text-decoration:none">대시보드 열기</a>` + (opts.runUrl ? ` · <a href="${esc(opts.runUrl)}" style="color:${C.accent};text-decoration:none">판정 실행 로그</a>` : '');
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ISPQ 알림</title></head>` +
@@ -448,8 +489,9 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     (week ? section(`지난주 이벤트 (${week.label})`, weekEventsHtml) + (r.events.length ? section('오늘 신규 이벤트', eventsHtml) : '') : section('이벤트', eventsHtml)) +
     section('활성 알림', activeHtml) +
     section('국내 3사 대표 지표 순위', ranksHtml, week ? `지난주 ${week.label} 일별 집계 평균 · 1위 초록 · 꼴찌 빨강 · 화살표는 전전주 대비 변화(초록=개선, 빨강=악화)` : '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
-    (week && opts.charts?.length ? section('지난주 일별 추이', chartsHtml, `진한 선·점 = 지난주 ${week.label} · 연한 선 = 1주 전 · 더 연한 선 = 2주 전 · 세 패널은 같은 눈금(사업자 간 수준 비교 가능) · 평균에 묻히는 하루 튐은 여기서 보입니다`) : '') +
-    section('수집 신선도', freshHtml) + section('트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +
+    (week && opts.charts?.length ? section('지표별 지난주 추이 + 트리거 판정', metricCards, `진한 선·점 = 지난주 ${week.label} · 연한 선 = 1주 전 · 더 연한 선 = 2주 전 · 빨간 점선 = 아래 표의 트리거 임계값(상대 조건은 28일 기준선으로 환산) · 패널 눈금은 공유, 사업자 간 수준이 5배 이상 벌어지면 개별(own scale)`) : '') +
+    section('수집 신선도', freshHtml) +
+    section(week && opts.charts?.length ? '운영 트리거 판정 현황' : '트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +
     `<tr><td style="padding:18px 0 0;border-top:1px solid ${C.line};margin-top:18px;font-size:11px;color:${C.faint};${FONT}">${links} · 판정 규칙: 핸드오프 문서 §17 · 이 메일은 자동 발송됩니다</td></tr>` +
     `</table></td></tr></table></body></html>`;
 }
@@ -471,7 +513,7 @@ async function main() {
   const week = weekly ? prevWeekWindow(now) : undefined;
   const r = evaluate({ data, cacheGeneratedAt, now, prev });
   await writeFile(STATE_FILE, JSON.stringify(r.state, null, 1));
-  const charts = week ? await renderWeeklyCharts(data, week.from, CHART_SPECS, CHARTS_DIR) : [];
+  const charts = week ? await renderWeeklyCharts(data, week.from, CHART_SPECS, CHARTS_DIR, chartGuides(data, week)) : [];
   if (charts.length) console.log(`[alert] 주간 추이 차트 ${charts.length}장 → ${CHARTS_DIR} (${charts.map((c) => `${c.id} ${(c.bytes / 1024).toFixed(0)}KB`).join(', ')})`);
   const report = buildReport(r, data, cacheGeneratedAt, now, week);
   await writeFile(REPORT_FILE, report);

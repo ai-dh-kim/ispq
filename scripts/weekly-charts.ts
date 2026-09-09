@@ -36,27 +36,51 @@ export function extractSeries(data: QualityData, metric: string, weekFrom: numbe
   });
 }
 
+const xmlEsc = (s: string) => s.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch] as string)); // 라벨에 <= 같은 문자가 오면 SVG 파싱이 깨진다
 const niceNum = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.0+$/, '');
 
-// 2배 해상도(레티나)로 그린다: 표시 640×125 → 1280×250.
-export function weeklyChartSvg(series: ChartSeries[], dayLabels: string[], unit: string): string {
-  const W = 1280, H = 250, PANEL_W = 400, GAP = 40, LEFT = 20;
-  const PAD_L = 58, PAD_R = 14, PAD_T = 34, PAD_B = 30;
-  const vals = series.flatMap((s) => s.weeks.flat()).filter((x): x is number => x != null);
-  let lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals) : 1;
+// 트리거 임계선: 해당 ISP 패널에 점선으로 그려 "값이 선에서 얼마나 떨어져 있나"를 보이게 한다(2026-09-09, 차트↔판정 연계).
+// 절대 임계(A1 ≥1% 등)는 값 그대로, 상대 임계(S -10%·A5 +10%p)는 호출 쪽이 28일 기준선으로 환산해 y로 넘긴다.
+export interface Guide { isp: string; y: number; label: string }
+
+// y축 공유 여부: 3사 수준(지난주 중앙값)이 5배 이상 벌어지면(IPv6: LG U+ 16% vs KT 0.02%) 공유하면 작은 쪽이 바닥에 깔려 안 보이므로 패널별 눈금.
+function levelOf(s: ChartSeries): number { const v = s.weeks[0].filter((x): x is number => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : 0; }
+function yRange(vals: number[], guides: number[]): { lo: number; hi: number } {
+  const all = [...vals, ...guides];
+  let lo = all.length ? Math.min(...all) : 0, hi = all.length ? Math.max(...all) : 1;
   if (hi === lo) { hi = lo + (Math.abs(lo) || 1) * 0.1; lo = lo - (Math.abs(lo) || 1) * 0.1; }
   const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
-  if (lo < 0 && vals.every((x) => x >= 0)) lo = 0; // 음수 불가 지표는 0에서 시작
-  const ticks = [lo, (lo + hi) / 2, hi];
+  if (lo < 0 && all.every((x) => x >= 0)) lo = 0; // 음수 불가 지표는 0에서 시작
+  return { lo, hi };
+}
+
+// 2배 해상도(레티나)로 그린다: 표시 640×125 → 1280×250.
+export function weeklyChartSvg(series: ChartSeries[], dayLabels: string[], unit: string, guides: Guide[] = []): string {
+  const W = 1280, H = 250, PANEL_W = 400, GAP = 40, LEFT = 20;
+  const PAD_L = 58, PAD_R = 14, PAD_T = 34, PAD_B = 30;
+  const levels = series.map(levelOf).filter((x) => x > 0);
+  const shared = levels.length < 2 || Math.max(...levels) / Math.min(...levels) < 5;
+  const allVals = series.flatMap((s) => s.weeks.flat()).filter((x): x is number => x != null);
+  const sharedRange = yRange(allVals, guides.map((g) => g.y));
   const out: string[] = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`, `<rect width="${W}" height="${H}" fill="#ffffff"/>`];
   series.forEach((s, p) => {
     const x0 = LEFT + p * (PANEL_W + GAP), px0 = x0 + PAD_L, px1 = x0 + PANEL_W - PAD_R, py0 = PAD_T, py1 = H - PAD_B;
+    const myGuides = guides.filter((g) => g.isp === s.isp);
+    const { lo, hi } = shared ? sharedRange : yRange(s.weeks.flat().filter((x): x is number => x != null), myGuides.map((g) => g.y));
+    const ticks = [lo, (lo + hi) / 2, hi];
     const X = (d: number) => px0 + (d / 6) * (px1 - px0), Y = (v: number) => py1 - ((v - lo) / (hi - lo)) * (py1 - py0);
     out.push(`<rect x="${x0}" y="6" width="${PANEL_W}" height="${H - 12}" rx="8" fill="#ffffff" stroke="#d7e0e8" stroke-width="2"/>`);
     out.push(`<text x="${x0 + 14}" y="26" font-family="sans-serif" font-size="20" font-weight="700" fill="${ISP_COLOR[s.isp]}">${ISP_LABEL[s.isp]}</text>`);
+    if (!shared) out.push(`<text x="${x0 + 14 + ISP_LABEL[s.isp].length * 13 + 6}" y="26" font-family="sans-serif" font-size="14" fill="#8496a4">(own scale)</text>`);
     for (const t of ticks) out.push(`<line x1="${px0}" y1="${Y(t).toFixed(1)}" x2="${px1}" y2="${Y(t).toFixed(1)}" stroke="#e5e9ee" stroke-width="2"/>`,
       `<text x="${px0 - 8}" y="${(Y(t) + 6).toFixed(1)}" font-family="sans-serif" font-size="17" fill="#8496a4" text-anchor="end">${niceNum(t)}</text>`);
     dayLabels.forEach((lab, d) => out.push(`<text x="${X(d).toFixed(1)}" y="${H - 9}" font-family="sans-serif" font-size="17" fill="#8496a4" text-anchor="middle">${lab}</text>`));
+    // 임계선(점선) + 라벨. 여러 개면 라벨이 겹치지 않게 선 위/아래로 번갈아.
+    myGuides.forEach((g, i) => {
+      const gy = Y(g.y);
+      out.push(`<line x1="${px0}" y1="${gy.toFixed(1)}" x2="${px1}" y2="${gy.toFixed(1)}" stroke="#a53a3a" stroke-opacity="0.75" stroke-width="2.5" stroke-dasharray="9 7"/>`);
+      out.push(`<text x="${px1 - 4}" y="${(i % 2 ? gy + 18 : gy - 6).toFixed(1)}" font-family="sans-serif" font-size="15" font-weight="700" fill="#a53a3a" text-anchor="end">${xmlEsc(g.label)}</text>`);
+    });
     // 2주 전 → 지난주 순으로 그려 지난주가 맨 위에 오게
     for (let w = 2; w >= 0; w--) {
       const st = WEEK_STYLE[w]; let dpath = '', pen = false;
@@ -79,13 +103,13 @@ export function svgToPng(svg: string): Buffer {
 
 export interface RenderedChart { id: string; short: string; unit: string; file: string; bytes: number }
 
-// 지표별 PNG를 outDir 에 'weekly-<metric>.png' 로 저장(매주 덮어씀).
-export async function renderWeeklyCharts(data: QualityData, weekFrom: number, specs: ChartSpec[], outDir: string): Promise<RenderedChart[]> {
+// 지표별 PNG를 outDir 에 'weekly-<metric>.png' 로 저장(매주 덮어씀). guides: 지표 id → 임계선 목록.
+export async function renderWeeklyCharts(data: QualityData, weekFrom: number, specs: ChartSpec[], outDir: string, guides: Record<string, Guide[]> = {}): Promise<RenderedChart[]> {
   await mkdir(outDir, { recursive: true });
   const dayLabels = Array.from({ length: 7 }, (_, d) => { const t = new Date(weekFrom + d * DAY); return `${t.getUTCMonth() + 1}/${t.getUTCDate()}`; });
   const out: RenderedChart[] = [];
   for (const spec of specs) {
-    const png = svgToPng(weeklyChartSvg(extractSeries(data, spec.id, weekFrom), dayLabels, spec.unit));
+    const png = svgToPng(weeklyChartSvg(extractSeries(data, spec.id, weekFrom), dayLabels, spec.unit, guides[spec.id] ?? []));
     const file = `weekly-${spec.id}.png`;
     await writeFile(resolve(outDir, file), png);
     out.push({ ...spec, file, bytes: png.length });
