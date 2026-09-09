@@ -1,0 +1,109 @@
+// detect-anomaly.ts 자체 검증 — 실데이터로 (1) 현재 발동 0건인지, (2) 합성 변조로 트리거별 발동·1회 발송·해소가
+// 동작하는지 확인한다. 외부 호출 없음. 실행: npm run alerts:test  (실패 시 exit 1 → CI에서 바로 드러남)
+
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { evaluate, emptyState, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import type { QualityData } from '../src/types.ts';
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const PUBLIC = resolve(__dir, '../public');
+let failures = 0;
+const ok = (cond: boolean, msg: string) => { console.log(`${cond ? '  ✓' : '  ✗'} ${msg}`); if (!cond) failures++; };
+const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
+
+// (isp, metric) coarse의 마지막 n개 유효 '완결일' 값을 f(기존값)로 치환 — 판정기와 같이 부분일(오늘 버킷)은 건너뜀
+function patchTail(d: QualityData, isp: string, metric: string, n: number, f: (v: number, i: number) => number) {
+  const blk = d.series[isp][metric].coarse; const v = blk[0]; const axis = d.tiers.coarse.t;
+  const generated = Date.parse(d.generatedAt);
+  let done = 0;
+  for (let i = v.length - 1; i >= 0 && done < n; i--) if (v[i] != null && axis[i] + 86400000 <= generated) { v[i] = f(v[i] as number, i); done++; }
+  if (done < n) throw new Error(`patchTail: ${isp}/${metric} 유효일 부족`);
+}
+const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+async function main() {
+  const real = JSON.parse(await readFile(resolve(PUBLIC, 'quality_data.json'), 'utf8')) as QualityData;
+  const caches: Record<string, string | null> = {};
+  for (const n of CACHE_NAMES) caches[n] = JSON.parse(await readFile(resolve(PUBLIC, `${n}_cache.json`), 'utf8')).generatedAt;
+  const now = Date.parse(real.generatedAt) + 2 * 3600000; // 생성 2시간 뒤 판정 가정
+  const run = (d: QualityData, prev: AlertState = emptyState(), t = now, c = caches) => evaluate({ data: d, cacheGeneratedAt: c, now: t, prev });
+
+  console.log('\n[1] 실데이터 기준 — 발동 0건이어야 함');
+  const base = run(real);
+  ok(base.events.length === 0, `이벤트 ${base.events.length}건 ${base.events.map((e) => e.key).join(',')}`);
+
+  console.log('\n[2] 트리거별 합성 발동');
+  const cases: { key: string; mutate: (d: QualityData) => void }[] = [
+    { key: 'A1:kt:rise', mutate: (d) => patchTail(d, 'kt', 'ipv6', 3, () => 5) },
+    { key: 'A1:skb:rise', mutate: (d) => patchTail(d, 'skb', 'ipv6', 3, () => 1.0) },
+    { key: 'A2:lgu:rise', mutate: (d) => patchTail(d, 'lgu', 'ipv6', 3, () => 35) },
+    { key: 'A2:lgu:drop', mutate: (d) => patchTail(d, 'lgu', 'ipv6', 7, () => 8) },
+    { key: 'A3:kt:rise', mutate: (d) => patchTail(d, 'kt', 'dnssec', 3, () => 12) },
+    { key: 'A3:lgu:rise', mutate: (d) => patchTail(d, 'lgu', 'dnssec', 3, () => 10) },
+    { key: 'A4:skb:drop', mutate: (d) => patchTail(d, 'skb', 'dnssec', 7, () => 20) },
+    { key: 'A5:lgu:rise', mutate: (d) => { const b = median(d.series.lgu.rpkiValid.coarse[0].filter((x): x is number => x != null).slice(-31, -3)); patchTail(d, 'lgu', 'rpkiValid', 3, () => b + 12); } },
+    { key: 'A6:kt:loss', mutate: (d) => patchTail(d, 'kt', 'packetLoss', 2, () => 0.4) },
+  ];
+  for (const c of cases) {
+    const d = clone(real); c.mutate(d);
+    const r = run(d);
+    const keys = r.events.map((e) => e.key);
+    ok(keys.includes(c.key) && r.events.length === 1, `${c.key} → ${keys.join(',') || '없음'}`);
+  }
+
+  console.log('\n[3] 경계·게이트');
+  { const d = clone(real); patchTail(d, 'kt', 'ipv6', 2, () => 5); ok(run(d).events.length === 0, 'A1 2일만 충족 → 미발동 (3일 연속 필요)'); }
+  { const d = clone(real); patchTail(d, 'kt', 'packetLoss', 1, () => 0.4); ok(run(d).events.length === 0, 'A6 1일 튐 → 미발동'); }
+  { const d = clone(real); patchTail(d, 'kt', 'ipv6', 3, () => 0.9); ok(run(d).events.length === 0, 'A1 0.9% → 미발동 (임계 1.0)'); }
+  { // A3 표본 게이트: 값은 넘지만 마지막 날 k가 급감 → 그날 제외돼 2일만 남아 미발동
+    const d = clone(real); patchTail(d, 'kt', 'dnssec', 3, () => 12);
+    const kArr = d.series.kt.dnssec.coarse[2]; for (let i = kArr.length - 1; i >= 0; i--) if (kArr[i] != null) { kArr[i] = 10; break; }
+    ok(run(d).events.length === 0, 'A3 저표본일 제외 → 미발동');
+  }
+  { const d = clone(real); patchTail(d, 'lgu', 'ipv6', 7, () => 12); ok(run(d).events.length === 0, 'A2 하락 12% → 미발동 (임계 10)'); }
+
+  console.log('\n[4] 1회 발송 원칙 + 해소');
+  { const d = clone(real); patchTail(d, 'kt', 'ipv6', 3, () => 5);
+    const r1 = run(d); const r2 = run(d, r1.state);
+    ok(r1.events.length === 1 && r2.events.length === 0, `첫 판정 ${r1.events.length}건 → 같은 상태 재판정 ${r2.events.length}건`);
+    ok(Object.keys(r2.state.active).length === 1, `활성 알림 유지 ${Object.keys(r2.state.active).join(',')}`);
+    // 해소: 값이 정상으로 돌아와 7일 → clear 1건
+    const d2 = clone(real); // 원본(0.0X%)이 곧 '정상 7일'
+    const r3 = run(d2, r2.state);
+    ok(r3.events.length === 1 && r3.events[0].type === 'clear' && !r3.state.active['A1:kt:rise'], `정상 복귀 → ${r3.events.map((e) => `${e.type}:${e.key}`).join(',')}`);
+    const d3 = clone(real); patchTail(d3, 'kt', 'ipv6', 3, () => 0.1); // 마지막 3일만 정상, 그 앞은 원본(정상) → 7일 미충족이므로 해소
+    ok(run(d3, r2.state).events.length === 1, '정상 7일 연속이면 해소');
+    const d4 = clone(real); patchTail(d4, 'kt', 'ipv6', 7, (_, i) => (i % 2 ? 5 : 0.1)); // 7일 중 일부만 충족 → 발동도 해소도 아님
+    ok(run(d4, r2.state).events.length === 0, '7일 중 일부만 충족 → 활성 유지(이벤트 없음)');
+  }
+
+  console.log('\n[5] D 그룹');
+  { const r = run(real, emptyState(), Date.parse(real.generatedAt) + 25 * 3600000); ok(r.events.some((e) => e.key === 'D1-a:quality_data'), `25h 미갱신 → ${r.events.map((e) => e.key).join(',')}`); }
+  { const r = run(real, emptyState(), Date.parse(real.generatedAt) + 20 * 3600000); ok(!r.events.some((e) => e.key.startsWith('D1-a')), '20h → D1-a 미발동'); }
+  { const c = { ...caches, steam: new Date(now - 80 * 3600000).toISOString() }; const r = run(real, emptyState(), now, c); ok(r.events.length === 1 && r.events[0].key === 'D1-b:steam', `steam 80h → ${r.events.map((e) => e.key).join(',')}`); }
+  { const c = { ...caches, nia: null }; const r = run(real, emptyState(), now, c); ok(r.events.some((e) => e.key === 'D1-b:nia'), 'nia 캐시 없음 → D1-b:nia'); }
+  { // D2: steam 그룹 전 사업자 마지막 3일을 4일 전 값으로 고정
+    const d = clone(real);
+    for (const isp of d.isps) { const v = d.series[isp]?.steamDownload?.coarse?.[0]; if (!v) continue; const idx: number[] = []; for (let i = v.length - 1; i >= 0 && idx.length < 4; i--) if (v[i] != null) idx.push(i); if (idx.length === 4) for (const i of idx.slice(0, 3)) v[i] = v[idx[3]]; }
+    const r = run(d); ok(r.events.length === 1 && r.events[0].key === 'D2:steam', `steam 3일 동일 → ${r.events.map((e) => e.key).join(',')}`);
+    const r2 = run(real, r.state); ok(r2.events.some((e) => e.type === 'clear' && e.key === 'D2:steam'), '변동 재개 → 즉시 해소');
+  }
+  { // D1-a 해소는 즉시
+    const r1 = run(real, emptyState(), Date.parse(real.generatedAt) + 25 * 3600000);
+    const r2 = run(real, r1.state, Date.parse(real.generatedAt) + 26 * 3600000, caches); // 여전히 오래됨 → 이벤트 없음
+    const fresh = clone(real); fresh.generatedAt = new Date(Date.parse(real.generatedAt) + 26 * 3600000).toISOString();
+    const r3 = run(fresh, r1.state, Date.parse(real.generatedAt) + 26 * 3600000, caches);
+    ok(r2.events.length === 0 && r3.events.length === 1 && r3.events[0].type === 'clear', `D1-a 유지 ${r2.events.length}건 · 갱신 후 ${r3.events.map((e) => e.type).join(',')}`);
+  }
+
+  console.log('\n[6] 정의 무결성');
+  ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
+  ok(KR3.every((i) => real.series[i]), 'KR3 존재');
+  ok(new Set(TRIGGERS.flatMap((t) => t.rules.map((r) => `${t.id}:${r.key}`))).size === TRIGGERS.reduce((n, t) => n + t.rules.length, 0), '규칙 키 중복 없음');
+
+  console.log(`\n${failures ? `실패 ${failures}건` : '전부 통과'}`);
+  process.exit(failures ? 1 : 0);
+}
+main().catch((e) => { console.error(e); process.exit(1); });

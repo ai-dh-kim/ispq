@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "mock": "node scripts/generate-mock.ts"
+    "mock": "node scripts/generate-mock.ts",
+    "alerts": "node scripts/detect-anomaly.ts",
+    "alerts:test": "node scripts/detect-anomaly.test.ts"
   },
   "dependencies": {
     "apexcharts": "^4.3.0",

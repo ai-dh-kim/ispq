@@ -1,0 +1,76 @@
+# 품질 이상 자동 알림 — 일 1회 트리거 판정 (2026-09-09, 핸드오프 §17).
+# scripts/detect-anomaly.ts 가 quality_data.json + 캐시 generatedAt 만 읽어 A1~A6·D1·D2 를 판정하고
+# public/alerts.json(활성 알림 + 이력)을 커밋한다. 판정 보고서는 매 실행 Step Summary 에 남는다
+# (= 드라이런 뷰어: 메일을 켜지 않아도 "울렸다면 이런 메일이 갔을 것"을 Actions 탭에서 볼 수 있다).
+#
+# 메일 발송은 저장소 변수 ALERT_MAIL_ENABLED=true 일 때만, 그리고 (신규 이벤트가 있거나 월요일)일 때만.
+# 필요한 시크릿: ALERT_SMTP_HOST · ALERT_SMTP_PORT · ALERT_SMTP_USER · ALERT_SMTP_PASS · ALERT_MAIL_TO · ALERT_MAIL_FROM
+name: Quality alert triggers (daily)
+
+on:
+  schedule:
+    # 12:00 KST 명목(03:00 UTC). 이 저장소의 크론 실측 지연(+2.5~4h)을 감안하면 실제 ~15:00 KST —
+    # 일별 수집 7종(~06~12 KST)과 NIA→Refresh 체인이 모두 끝난 뒤다.
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: quality-alert
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Evaluate triggers → alerts.json + report
+        id: detect
+        env:
+          ALERT_REPORT: ${{ runner.temp }}/alert_report.md
+        run: node scripts/detect-anomaly.ts
+
+      - name: Publish report to step summary
+        run: cat "${{ runner.temp }}/alert_report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # 커밋 방식은 collect.yml 과 동일(최신 원격으로 reset 후 생성물을 얹음 — 리베이스 경합 없음, §15).
+      # alerts.json 은 이 워크플로만 쓰므로 대피시킬 파일도 하나뿐이다.
+      - name: Commit alerts.json
+        run: |
+          set -euo pipefail
+          git config user.name "quality-bot"
+          git config user.email "quality-bot@users.noreply.github.com"
+          cp public/alerts.json "${RUNNER_TEMP}/alerts.json"
+          for attempt in 1 2 3; do
+            git fetch --no-tags origin "${GITHUB_REF_NAME}"
+            git reset --hard FETCH_HEAD
+            cp "${RUNNER_TEMP}/alerts.json" public/alerts.json
+            git add public/alerts.json
+            if git diff --cached --quiet; then echo "No alert state changes."; exit 0; fi
+            git commit -m "chore(alert): daily trigger evaluation [skip ci]"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then echo "pushed on attempt ${attempt}"; exit 0; fi
+            echo "::notice::push raced on attempt ${attempt} — 재시도"
+          done
+          echo "::error::3회 재시도 후에도 push 실패"; exit 1
+
+      - name: Send mail (사건/해소 즉시 · 주간 요약은 월요일)
+        if: ${{ vars.ALERT_MAIL_ENABLED == 'true' && (steps.detect.outputs.new_events != '0' || steps.detect.outputs.weekday == '1') }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.ALERT_SMTP_HOST }}
+          server_port: ${{ secrets.ALERT_SMTP_PORT }}
+          secure: true
+          username: ${{ secrets.ALERT_SMTP_USER }}
+          password: ${{ secrets.ALERT_SMTP_PASS }}
+          subject: ${{ steps.detect.outputs.subject }}
+          to: ${{ secrets.ALERT_MAIL_TO }}
+          from: ${{ secrets.ALERT_MAIL_FROM }}
+          convert_markdown: true
+          html_body: file://${{ runner.temp }}/alert_report.md
