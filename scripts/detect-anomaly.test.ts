@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, emptyState, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import { evaluate, emptyState, buildMailHtml, buildReport, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
 import type { QualityData } from '../src/types.ts';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -113,7 +113,16 @@ async function main() {
     ok(r2.events.length === 0 && r3.events.length === 1 && r3.events[0].type === 'clear', `D1-a 유지 ${r2.events.length}건 · 갱신 후 ${r3.events.map((e) => e.type).join(',')}`);
   }
 
-  console.log('\n[6] 정의 무결성');
+  console.log('\n[6] 보고서·메일 렌더링');
+  { const html = buildMailHtml(base, real, caches, now, { runUrl: 'https://example/run/1' });
+    ok(html.includes('국내 3사 대표 지표 순위') && html.includes('A1') && html.includes('D2') && html.includes('이상 없음') && html.includes('example/run/1'), 'HTML 메일: 순위·판정 현황·상태·링크 포함');
+    ok(!html.includes('<style') && !/display:\s*(flex|grid)/.test(html), 'HTML 메일: <style>·flex·grid 미사용(메일 클라이언트 호환)');
+    const md = buildReport(base, real, caches, now); ok(md.includes('| 지표 | 1위 |') && md.includes('A1:kt:rise 최근값'), 'markdown 보고서: 표·판정 상세 포함'); }
+  { const d = clone(real); patchTail(d, 'kt', 'ipv6', 3, () => 5); const rr = run(d);
+    const html = buildMailHtml(rr, d, caches, now, { test: true });
+    ok(html.includes('신규 발동') && html.includes('A1:kt:rise') && html.includes('테스트 발송') && html.includes('발동 중'), 'HTML 메일: 발동 카드·활성 상태·테스트 표기'); }
+
+  console.log('\n[7] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
   ok(KR3.every((i) => real.series[i]), 'KR3 존재');
   ok(new Set(TRIGGERS.flatMap((t) => t.rules.map((r) => `${t.id}:${r.key}`))).size === TRIGGERS.reduce((n, t) => n + t.rules.length, 0), '규칙 키 중복 없음');

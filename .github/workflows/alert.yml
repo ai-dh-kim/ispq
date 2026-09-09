@@ -40,7 +40,9 @@ jobs:
       - name: Evaluate triggers → alerts.json + report
         id: detect
         env:
-          ALERT_REPORT: ${{ runner.temp }}/alert_report.md
+          ALERT_REPORT: ${{ runner.temp }}/alert_report.md        # Step Summary용 markdown
+          ALERT_REPORT_HTML: ${{ runner.temp }}/alert_report.html # 메일 본문용 HTML(판정기가 직접 생성 — 마크다운 변환기는 표를 못 그림)
+          ALERT_TEST_MAIL: ${{ inputs.test_mail == true }}
         run: node scripts/detect-anomaly.ts
 
       - name: Publish report to step summary
@@ -79,5 +81,4 @@ jobs:
           subject: ${{ inputs.test_mail == true && '[ISPQ 테스트] 알림 메일 배관 확인 — 본문은 오늘 판정 보고서' || steps.detect.outputs.subject }}
           to: ${{ secrets.ALERT_MAIL_TO }}
           from: ${{ secrets.ALERT_MAIL_FROM }}
-          convert_markdown: true
-          html_body: file://${{ runner.temp }}/alert_report.md
+          html_body: file://${{ runner.temp }}/alert_report.html

@@ -23,7 +23,9 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = resolve(__dir, '../public');
 const DATA_FILE = resolve(PUBLIC, 'quality_data.json');
 const STATE_FILE = resolve(PUBLIC, 'alerts.json');
-const REPORT_FILE = process.env.ALERT_REPORT ?? resolve(__dir, '../alert_report.md');
+const REPORT_FILE = process.env.ALERT_REPORT ?? resolve(__dir, '../alert_report.md'); // Step Summary용(markdown)
+const REPORT_HTML = process.env.ALERT_REPORT_HTML ?? resolve(__dir, '../alert_report.html'); // 메일 본문용(인라인 스타일 HTML)
+const DASHBOARD_URL = 'https://ai-dh-kim.github.io/ispq/';
 
 export const KR3 = ['kt', 'skb', 'lgu'];
 const CLEAR_DAYS = 7; // 해소 판정: 반대 조건(=미충족) 연속 일수
@@ -163,13 +165,25 @@ export interface EvalInput {
   now: number; // epoch ms
   prev: AlertState;
 }
-export interface EvalResult { state: AlertState; events: AlertEvent[]; checks: string[] }
+// 판정 1건의 구조화 결과 — 보고서(markdown)와 메일(HTML 표) 양쪽이 이걸로 렌더링한다.
+export interface Check {
+  key: string; group: 'A' | 'S' | 'D'; trigger: string; target: string; // target: ISP id 또는 캐시/출처 그룹명
+  cond: string; value: number | null; unit: string; date: string; // 최근 유효값과 그 날짜(D는 경과시간·기준시각)
+  met: boolean; active: boolean;
+}
+export interface EvalResult { state: AlertState; events: AlertEvent[]; checks: Check[] }
+
+const condText = (r: Rule, unit: string) =>
+  r.cmp === 'rise_pp' ? `28일 중앙값 대비 +${r.th}%p 이상 · ${r.days}일 연속`
+  : r.cmp === 'drop_pct' ? `28일 중앙값 대비 -${r.th}% 이상 하락 · ${r.days}일 연속`
+  : r.cmp === 'gt0' ? `0 초과 · ${r.days}일 연속`
+  : `${r.cmp === 'gte' ? '≥' : '≤'} ${r.th}${unit} · ${r.days}일 연속`;
 
 export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): EvalResult {
   const nowIso = new Date(now).toISOString();
   const active: Record<string, ActiveAlert> = { ...prev.active };
   const events: AlertEvent[] = [];
-  const checks: string[] = [];
+  const checks: Check[] = [];
   const fire = (key: string, a: ActiveAlert) => { active[key] = a; events.push({ at: nowIso, type: 'fire', key, trigger: a.trigger, target: a.target, value: a.value, detail: a.detail }); };
   const clear = (key: string, value: number | null, detail: string) => { const a = active[key]; delete active[key]; events.push({ at: nowIso, type: 'clear', key, trigger: a.trigger, target: a.target, value, detail }); };
 
@@ -183,13 +197,15 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
         const on = tail(pts, r, r.days);
         const off = tail(pts, r, CLEAR_DAYS);
         const lastV = pts.length ? pts[pts.length - 1].v : null;
-        checks.push(`${key} 최근값 ${fmt(lastV, unit)} (${pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음'}) → ${on.all ? '충족' : '미충족'}${active[key] ? ' [활성]' : ''}`);
+        const mname = METRIC_BY_ID[trg.metric]?.name ?? trg.metric;
         if (!active[key] && on.all && on.last && on.first) {
           fire(key, { trigger: trg.id, target: isp, since: dayKey(on.first.t), value: on.last.v,
-            detail: `${ispName(isp)} ${METRIC_BY_ID[trg.metric]?.name ?? trg.metric} ${fmt(on.last.v, unit)} — ${r.days}일 연속 ${r.cmp === 'rise_pp' ? `28일 중앙값 대비 +${r.th}%p 이상` : r.cmp === 'drop_pct' ? `28일 중앙값 대비 -${r.th}% 이상 하락` : r.cmp === 'gt0' ? '0 초과' : `${r.cmp === 'gte' ? '≥' : '≤'} ${r.th}${unit}`}. ${r.meaning}` });
+            detail: `${ispName(isp)} ${mname} ${fmt(on.last.v, unit)} — ${condText(r, unit)}. ${r.meaning}` });
         } else if (active[key] && off.none && off.last) {
-          clear(key, off.last.v, `${ispName(isp)} ${METRIC_BY_ID[trg.metric]?.name ?? trg.metric} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
+          clear(key, off.last.v, `${ispName(isp)} ${mname} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
         }
+        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, cond: condText(r, unit),
+          value: lastV, unit, date: pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음', met: on.all, active: !!active[key] });
       }
     }
   }
@@ -198,9 +214,10 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
   {
     const key = 'D1-a:quality_data';
     const ageH = (now - Date.parse(data.generatedAt)) / HOUR;
-    checks.push(`${key} 마지막 갱신 ${ageH.toFixed(1)}h 전 (허용 ${D1A_HOURS}h)`);
     if (!active[key] && ageH >= D1A_HOURS) fire(key, { trigger: 'D1-a', target: 'quality_data', since: data.generatedAt, value: Math.round(ageH), detail: `quality_data.json 이 ${ageH.toFixed(0)}시간 미갱신 — Refresh 워크플로 정지 의심(GitHub 장애·Cloudflare 토큰 만료)` });
     else if (active[key] && ageH < D1A_HOURS) clear(key, Math.round(ageH), `quality_data.json 갱신 재개(${ageH.toFixed(1)}h 전)`);
+    checks.push({ key, group: 'D', trigger: 'D1-a', target: 'quality_data', cond: `${D1A_HOURS}h 이상 미갱신`, value: Math.round(ageH * 10) / 10, unit: 'h',
+      date: data.generatedAt.slice(0, 16).replace('T', ' ') + 'Z', met: ageH >= D1A_HOURS, active: !!active[key] });
   }
 
   // D1-b: 일별 캐시 7종 미갱신
@@ -208,9 +225,10 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
     const key = `D1-b:${name}`;
     const g = cacheGeneratedAt[name];
     const ageH = g ? (now - Date.parse(g)) / HOUR : Infinity;
-    checks.push(`${key} 마지막 수집 ${g ? `${ageH.toFixed(1)}h 전` : '파일 없음'} (허용 ${D1B_HOURS}h)`);
     if (!active[key] && ageH >= D1B_HOURS) fire(key, { trigger: 'D1-b', target: name, since: g ?? nowIso, value: Number.isFinite(ageH) ? Math.round(ageH) : null, detail: `${name}_cache.json 이 ${Number.isFinite(ageH) ? `${(ageH / 24).toFixed(1)}일` : '기록 없음'} 미갱신 — 수집기 정지·API 규격 변경·엔드포인트 차단 의심` });
     else if (active[key] && ageH < D1B_HOURS) clear(key, Math.round(ageH), `${name} 수집 재개(${ageH.toFixed(1)}h 전)`);
+    checks.push({ key, group: 'D', trigger: 'D1-b', target: name, cond: `${D1B_HOURS}h 이상 미갱신`, value: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, unit: 'h',
+      date: g ? g.slice(0, 16).replace('T', ' ') + 'Z' : '파일 없음', met: ageH >= D1B_HOURS, active: !!active[key] });
   }
 
   // D2: 출처 그룹의 전 사업자·전 값이 D2_DAYS 연속 완전 동일
@@ -231,26 +249,43 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
       if (seg[s - 1].n !== seg[s].n) { stale = false; break; }
       for (let q = 0; q < a.length; q++) if (a[q] !== b[q]) { stale = false; break; }
     }
-    checks.push(`${key} 최근 ${D2_DAYS}일(${seg.map((d) => dayKey(d.t)).join(',')}) ${stale ? '완전 동일 → 정체' : '변동 있음'}`);
     if (!active[key] && stale) fire(key, { trigger: 'D2', target: group, since: dayKey(seg[0].t), value: null, detail: `${group} 출처의 전 사업자·전 값이 ${D2_DAYS}일 연속(${dayKey(seg[0].t)}~${dayKey(seg[seg.length - 1].t)}) 완전 동일 — 수집은 성공하나 공급처가 새 값을 내놓지 않음` });
     else if (active[key] && !stale) clear(key, null, `${group} 출처 값 변동 재개`);
+    checks.push({ key, group: 'D', trigger: 'D2', target: group, cond: `전 사업자·전 값 ${D2_DAYS}일 연속 동일`, value: null, unit: '',
+      date: seg.length ? `${dayKey(seg[0].t)}~${dayKey(seg[seg.length - 1].t).slice(5)}` : '데이터 없음', met: stale, active: !!active[key] });
   }
 
   const history = [...prev.history, ...events].slice(-HISTORY_CAP);
   return { state: { version: 1, updatedAt: nowIso, lastRun: { at: nowIso, events: events.length }, active, history }, events, checks };
 }
 
-// ---- 주간 요약(월요일) 재료: 3사 대표 지표 순위 + 수집 신선도 ----
-export function digest(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): string {
+// ---- 요약 재료: 3사 대표 지표 순위(종합지표 패널과 동일 계산) + 수집 신선도 ----
+export interface RankCell { isp: string; v: number | null; rank: number | null; ranked: number }
+export interface DigestData {
+  ranks: { id: string; short: string; unit: string; cells: RankCell[] }[];
+  fresh: { name: string; ageH: number | null; limitH: number }[];
+}
+export function digestData(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): DigestData {
   const rows = buildSummary(data, KR3, SUMMARY_METRICS.map((m) => m.id), 7);
+  const ranks = SUMMARY_METRICS.map((m) => ({ id: m.id, short: m.short, unit: METRIC_BY_ID[m.id]?.unit ?? '', cells: KR3.map((isp) => ({ isp, ...rows.get(isp)![m.id] })) }));
+  const fresh = [
+    { name: 'quality_data', ageH: (now - Date.parse(data.generatedAt)) / HOUR, limitH: D1A_HOURS },
+    ...CACHE_NAMES.map((n) => { const g = cacheGeneratedAt[n]; return { name: n, ageH: g ? (now - Date.parse(g)) / HOUR : null, limitH: D1B_HOURS }; }),
+  ];
+  return { ranks, fresh };
+}
+const round1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
+
+// Step Summary(markdown)용
+export function digest(data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): string {
+  const dg = digestData(data, cacheGeneratedAt, now);
   const lines: string[] = ['| 지표 | 1위 | 2위 | 3위 |', '|---|---|---|---|'];
-  for (const m of SUMMARY_METRICS) {
-    const unit = METRIC_BY_ID[m.id]?.unit ?? '';
-    const cells = KR3.map((isp) => ({ isp, ...rows.get(isp)![m.id] })).filter((c) => c.rank != null).sort((a, b) => a.rank! - b.rank!);
-    lines.push(`| ${m.short} | ${cells.map((c) => `${ispName(c.isp)} ${fmt(c.v == null ? null : Math.round(c.v * 10) / 10, unit)}`).join(' | ')} |`);
+  for (const m of dg.ranks) {
+    const cells = m.cells.filter((c) => c.rank != null).sort((a, b) => a.rank! - b.rank!);
+    lines.push(`| ${m.short} | ${cells.map((c) => `${ispName(c.isp)} ${fmt(round1(c.v), m.unit)}`).join(' | ')} |`);
   }
-  const fresh = CACHE_NAMES.map((n) => { const g = cacheGeneratedAt[n]; return `${n} ${g ? `${((now - Date.parse(g)) / HOUR).toFixed(0)}h` : '없음'}`; }).join(' · ');
-  return `### 3사 대표 지표 순위 (최근 7일 평균)\n${lines.join('\n')}\n\n### 수집 신선도\nquality_data ${((now - Date.parse(data.generatedAt)) / HOUR).toFixed(1)}h · ${fresh}`;
+  const fresh = dg.fresh.map((f) => `${f.name} ${f.ageH == null ? '없음' : `${f.ageH.toFixed(f.name === 'quality_data' ? 1 : 0)}h`}`).join(' · ');
+  return `### 3사 대표 지표 순위 (최근 7일 평균)\n${lines.join('\n')}\n\n### 수집 신선도\n${fresh}`;
 }
 
 export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number): string {
@@ -264,8 +299,91 @@ export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: 
   out.push(`## 활성 알림 ${act.length}건`);
   for (const [k, a] of act) out.push(`- ${k} (since ${a.since.slice(0, 10)}) — ${a.detail}`);
   if (!act.length) out.push('- 없음');
-  out.push('', digest(data, cacheGeneratedAt, now), '', '<details><summary>판정 상세</summary>', '', ...r.checks.map((c) => `- ${c}`), '', '</details>');
+  out.push('', digest(data, cacheGeneratedAt, now), '', '<details><summary>판정 상세</summary>', '',
+    ...r.checks.map((c) => `- ${c.key} 최근값 ${fmt(c.value, c.unit)} (${c.date}) → ${c.met ? '충족' : '미충족'}${c.active ? ' [활성]' : ''}`), '', '</details>');
   return out.join('\n');
+}
+
+// ---- 메일 본문(HTML) — 메일 클라이언트는 <style>·flex·grid를 못 믿으므로 표 레이아웃 + 인라인 스타일만 쓴다 ----
+const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch] as string));
+const C = { ink: '#16242f', soft: '#54697a', faint: '#8496a4', line: '#d7e0e8', paper: '#eef2f6', card: '#ffffff', card2: '#f7fafc',
+  accent: '#1f6091', accentSoft: '#e2edf6', good: '#237a4d', goodSoft: '#e0f0e7', warn: '#9a6a13', warnSoft: '#f6ecd6',
+  bad: '#a53a3a', badSoft: '#f7e3e3', ops: '#5a6b7a', opsSoft: '#e9eef2' };
+// 셀마다 반복되는 문자열이라 짧게 유지(Gmail은 본문 102KB 초과 시 잘라냄). 한글은 각 OS 기본 한글 폰트로 폴백된다.
+const FONT = 'font-family:Malgun Gothic,Arial,sans-serif;';
+const GROUP_LABEL: Record<Check['group'], string> = { A: '사건 트리거 (A) — 구조 변화·장애', S: '속도 트리거 (S) — 28일 대비 하락', D: '운영 트리거 (D) — 수집 상태' };
+
+export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt: Record<string, string | null>, now: number,
+  opts: { runUrl?: string; test?: boolean } = {}): string {
+  const kst = new Date(now).toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16);
+  const fired = r.events.filter((e) => e.type === 'fire'), cleared = r.events.filter((e) => e.type === 'clear');
+  const act = Object.entries(r.state.active);
+  const dg = digestData(data, cacheGeneratedAt, now);
+  const freshState = (f: DigestData['fresh'][number]) => f.ageH == null ? 'none' : f.ageH >= f.limitH ? 'over' : f.ageH >= f.limitH * 0.5 ? 'warn' : 'ok';
+  const freshBad = dg.fresh.filter((f) => freshState(f) === 'over' || freshState(f) === 'none').length;
+  const freshWarn = dg.fresh.filter((f) => freshState(f) === 'warn').length;
+
+  const chip = (text: string, color: string, bg: string) =>
+    `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;color:${color};background:${bg};white-space:nowrap;${FONT}">${esc(text)}</span>`;
+  const status = fired.length ? chip(`사건 ${fired.length}건`, C.bad, C.badSoft)
+    : cleared.length ? chip(`해소 ${cleared.length}건`, C.good, C.goodSoft)
+    : act.length ? chip(`활성 알림 ${act.length}건 유지`, C.warn, C.warnSoft) : chip('이상 없음', C.good, C.goodSoft);
+  const tile = (num: string, lab: string, color: string) =>
+    `<td width="25%" style="padding:0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-left:3px solid ${color};border-radius:6px">` +
+    `<div style="font-size:21px;font-weight:700;color:${C.ink};${FONT}">${esc(num)}</div><div style="font-size:11px;color:${C.soft};${FONT}">${esc(lab)}</div></td></tr></table></td>`;
+  const section = (title: string, body: string, sub = '') =>
+    `<tr><td style="padding:18px 0 0"><div style="font-size:14px;font-weight:700;color:${C.ink};${FONT}">${esc(title)}</div>` +
+    (sub ? `<div style="font-size:11.5px;color:${C.faint};margin:2px 0 8px;${FONT}">${esc(sub)}</div>` : '<div style="height:8px"></div>') + body + '</td></tr>';
+  const th = (t: string, extra = '') => `<th align="left" style="padding:6px 10px;font-size:11px;color:${C.faint};font-weight:600;background:${C.card2};border-bottom:1px solid ${C.line};${FONT}${extra}">${esc(t)}</th>`;
+  const td = (html: string, extra = '') => `<td style="padding:7px 10px;font-size:12.5px;color:${C.ink};border-bottom:1px solid ${C.line};${FONT}${extra}">${html}</td>`;
+  const table = (inner: string) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.card};border:1px solid ${C.line};border-radius:6px;border-collapse:separate;overflow:hidden">${inner}</table>`;
+
+  // 이벤트 카드
+  const eventCard = (e: AlertEvent) => { const f = e.type === 'fire'; return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px"><tr><td style="padding:10px 12px;background:${f ? C.badSoft : C.goodSoft};border-left:4px solid ${f ? C.bad : C.good};border-radius:6px;${FONT}">` +
+    `<div style="font-size:11px;font-weight:700;color:${f ? C.bad : C.good}">${f ? '🔴 신규 발동' : '🟢 해소'} · ${esc(e.key)}</div><div style="font-size:13px;color:${C.ink};margin-top:3px">${esc(e.detail)}</div></td></tr></table>`; };
+  const eventsHtml = r.events.length ? r.events.map(eventCard).join('')
+    : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">신규 이벤트 없음 — 모든 트리거가 정상 범위입니다.</div>`;
+  const activeHtml = act.length ? table(act.map(([k, a]) => `<tr>${td(`<b>${esc(k)}</b><div style="font-size:11px;color:${C.faint}">since ${esc(a.since.slice(0, 10))}</div>`, 'white-space:nowrap')}${td(esc(a.detail))}</tr>`).join(''))
+    : `<div style="font-size:12.5px;color:${C.soft};${FONT}">없음</div>`;
+
+  // 3사 순위 매트릭스 — 종합지표 패널과 같은 색 규칙(1위 초록 · 꼴찌 빨강)
+  const rankCell = (c: RankCell, unit: string) => {
+    const bg = c.rank === 1 ? C.goodSoft : c.rank != null && c.rank === c.ranked && c.ranked > 1 ? C.badSoft : 'transparent';
+    const col = c.rank === 1 ? C.good : c.rank != null && c.rank === c.ranked && c.ranked > 1 ? C.bad : C.soft;
+    return td(`<span style="font-size:13px;font-weight:700;color:${C.ink}">${esc(fmt(round1(c.v), ''))}</span><span style="font-size:10.5px;color:${C.faint}"> ${esc(unit)}</span>` +
+      (c.rank != null ? `<span style="float:right;font-size:10.5px;font-weight:700;color:${col}">${c.rank}위</span>` : ''), `background:${bg};text-align:left`);
+  };
+  const ranksHtml = table(`<tr>${th('지표 (최근 7일 평균)')}${KR3.map((i) => th(ispName(i), 'text-align:left;width:22%')).join('')}</tr>` +
+    dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit)).join('')}</tr>`).join(''));
+
+  // 수집 신선도
+  const freshChip = (f: DigestData['fresh'][number]) => { const s = freshState(f); return s === 'ok' ? chip('정상', C.good, C.goodSoft) : s === 'warn' ? chip('주의', C.warn, C.warnSoft) : s === 'over' ? chip('허용 초과', C.bad, C.badSoft) : chip('파일 없음', C.bad, C.badSoft); };
+  const freshHtml = table(`<tr>${th('출처')}${th('마지막 갱신', 'text-align:right')}${th('허용', 'text-align:right')}${th('상태')}</tr>` +
+    dg.fresh.map((f) => `<tr>${td(esc(f.name))}${td(f.ageH == null ? '–' : `${f.ageH.toFixed(1)}h 전`, 'text-align:right;white-space:nowrap')}${td(`${f.limitH}h`, 'text-align:right;color:' + C.faint)}${td(freshChip(f))}</tr>`).join(''));
+
+  // 트리거 판정 현황
+  const stateChip = (c: Check) => c.active ? chip('발동 중', C.bad, C.badSoft) : c.met ? chip('충족', C.warn, C.warnSoft) : chip('정상', C.ops, C.opsSoft);
+  const groups: Check['group'][] = ['A', 'S', 'D'];
+  const checksHtml = table(`<tr>${th('트리거')}${th('대상')}${th('조건')}${th('최근값', 'text-align:right')}${th('기준일')}${th('상태')}</tr>` +
+    groups.map((g) => `<tr><td colspan="6" style="padding:6px 10px;font-size:11px;font-weight:700;color:${C.accent};background:${C.accentSoft};${FONT}">${esc(GROUP_LABEL[g])}</td></tr>` +
+      r.checks.filter((c) => c.group === g).map((c) => `<tr>${td(`<b>${esc(c.trigger)}</b>`, 'white-space:nowrap')}${td(esc(c.group === 'D' ? c.target : ispName(c.target)), 'white-space:nowrap')}${td(`<span style="color:${C.soft};font-size:11.5px">${esc(c.cond)}</span>`)}` +
+        `${td(esc(fmt(c.value, c.unit)), 'text-align:right;white-space:nowrap')}${td(`<span style="color:${C.faint};font-size:11px">${esc(c.date)}</span>`, 'white-space:nowrap')}${td(stateChip(c))}</tr>`).join('')).join(''));
+
+  const links = `<a href="${DASHBOARD_URL}" style="color:${C.accent};text-decoration:none">대시보드 열기</a>` + (opts.runUrl ? ` · <a href="${esc(opts.runUrl)}" style="color:${C.accent};text-decoration:none">판정 실행 로그</a>` : '');
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>ISPQ 알림</title></head>` +
+    `<body style="margin:0;padding:0;background:${C.paper}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.paper}"><tr><td align="center" style="padding:20px 10px">` +
+    `<table role="presentation" width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%">` +
+    `<tr><td style="padding:0 0 12px;border-bottom:3px solid ${C.accent}"><div style="font-size:11px;letter-spacing:.12em;color:${C.accent};font-weight:700;${FONT}">ISP 품질 대시보드 · 자동 알림${opts.test ? ' · 테스트 발송' : ''}</div>` +
+    `<div style="font-size:20px;font-weight:700;color:${C.ink};margin:4px 0 6px;${FONT}">품질 이상 알림 판정</div><div style="font-size:12px;color:${C.faint};${FONT}">${esc(kst)} KST &nbsp; ${status}</div></td></tr>` +
+    `<tr><td style="padding:14px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>` +
+    tile(String(fired.length), '신규 발동', fired.length ? C.bad : C.accent) + tile(String(act.length), '활성 알림', act.length ? C.warn : C.accent) +
+    tile(freshBad ? `${freshBad} 초과` : freshWarn ? `${freshWarn} 주의` : '정상', '수집 신선도', freshBad ? C.bad : freshWarn ? C.warn : C.good) + tile(String(r.checks.length), '판정 항목', C.accent) +
+    `</tr></table></td></tr>` +
+    section('이벤트', eventsHtml) + section('활성 알림', activeHtml) +
+    section('국내 3사 대표 지표 순위', ranksHtml, '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
+    section('수집 신선도', freshHtml) + section('트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +
+    `<tr><td style="padding:18px 0 0;border-top:1px solid ${C.line};margin-top:18px;font-size:11px;color:${C.faint};${FONT}">${links} · 판정 규칙: 핸드오프 문서 §17 · 이 메일은 자동 발송됩니다</td></tr>` +
+    `</table></td></tr></table></body></html>`;
 }
 
 // ---- IO ----
@@ -285,6 +403,9 @@ async function main() {
   await writeFile(STATE_FILE, JSON.stringify(r.state, null, 1));
   const report = buildReport(r, data, cacheGeneratedAt, now);
   await writeFile(REPORT_FILE, report);
+  const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+    ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined;
+  await writeFile(REPORT_HTML, buildMailHtml(r, data, cacheGeneratedAt, now, { runUrl, test: process.env.ALERT_TEST_MAIL === 'true' }));
   console.log(report);
 
   // 워크플로 출력: 신규 이벤트 수 · 메일 제목 · KST 요일(1=월)
@@ -294,7 +415,7 @@ async function main() {
     ? `[ISPQ 알림] ${fired.map((e) => e.key).join(', ')}`
     : r.events.length ? `[ISPQ 해소] ${r.events.map((e) => e.key).join(', ')}` : `[ISPQ 주간 요약] 활성 알림 ${Object.keys(r.state.active).length}건`;
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, `new_events=${r.events.length}\nfired=${fired.length}\nweekday=${weekday}\nsubject=${subject}\nreport=${REPORT_FILE}\n`);
+    await appendFile(process.env.GITHUB_OUTPUT, `new_events=${r.events.length}\nfired=${fired.length}\nweekday=${weekday}\nsubject=${subject}\nreport=${REPORT_FILE}\nreport_html=${REPORT_HTML}\n`);
   }
 }
 
