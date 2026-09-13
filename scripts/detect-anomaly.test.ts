@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, chartGuides, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
-import { extractSeries, weeklyChartSvg, svgToPng, renderWeeklyCharts } from './weekly-charts.ts';
+import { extractSeries, weeklyChartSvg, svgToPng, renderWeeklyCharts, CHART_ISPS } from './weekly-charts.ts';
 import { tmpdir } from 'node:os';
 import type { QualityData } from '../src/types.ts';
 
@@ -185,6 +185,7 @@ async function main() {
   console.log('\n[9] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
   ok(KR3.every((i) => real.series[i]), 'KR3 존재');
+  ok(KR3.join() === CHART_ISPS.join() && KR3[0] === 'lgu', `순위표·판정 열 순서 = 차트 패널 순서 (${KR3.join(' · ')})`);
   ok(new Set(TRIGGERS.flatMap((t) => t.rules.map((r) => `${t.id}:${r.key}`))).size === TRIGGERS.reduce((n, t) => n + t.rules.length, 0), '규칙 키 중복 없음');
 
   console.log(`\n${failures ? `실패 ${failures}건` : '전부 통과'}`);

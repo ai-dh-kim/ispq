@@ -37,7 +37,9 @@ const CHART_SPECS: ChartSpec[] = [
   { id: 'rpkiValid', short: 'RPKI 유효율 (Radar)', unit: '%' }, { id: 'packetLoss', short: '패킷 손실률 (SpeedTest)', unit: '%' },
 ];
 
-export const KR3 = ['kt', 'skb', 'lgu'];
+// 표시 순서: LG U+ · KT · SK브로드밴드(2026-09-14 사용자 지정). weekly-charts.ts의 CHART_ISPS 와 같은 순서라
+// 순위표·판정 행·차트 패널이 세로로 대응된다. 순위 계산은 값 비교라 이 순서에 영향받지 않는다.
+export const KR3 = ['lgu', 'kt', 'skb'];
 const CLEAR_DAYS = 7; // 해소 판정: 반대 조건(=미충족) 연속 일수
 const BASE_DAYS = 28; // rise_pp 기준선 창(요일 상쇄를 위해 7의 배수)
 const K_GATE_RATIO = 0.3; // 표본 게이트: 당일 k < 28일 중앙값 × 0.3 이면 그날은 판정 제외
