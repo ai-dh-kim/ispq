@@ -49,7 +49,7 @@ const D2_DAYS = 3; // 전 사업자·전 값 완전 동일 연속 일수
 const D2_MIN_VALUES = 5; // D2 판정에 필요한 최소 non-null 값 수(케이블사 결측 등 감안)
 
 // ---- 트리거 정의 (§17 표와 1:1) ----
-type Cmp = 'gte' | 'lte' | 'gt0' | 'rise_pp' | 'drop_pct';
+type Cmp = 'gte' | 'lte' | 'gt0' | 'rise_pp' | 'drop_pp' | 'drop_pct';
 interface Rule { key: string; cmp: Cmp; th: number; days: number; meaning: string }
 export interface Trigger {
   id: string;
@@ -70,8 +70,14 @@ export const TRIGGERS: Trigger[] = [
     rules: [{ key: 'rise', cmp: 'gte', th: 10, days: 3, meaning: 'DNSSEC 검증 활성화 — 평소 2%대, 1년 최대 8.2%' }] },
   { id: 'A4', metric: 'dnssec', isps: ['skb'], kGate: true,
     rules: [{ key: 'drop', cmp: 'lte', th: 25, days: 7, meaning: 'DNSSEC 검증 비활성화·후퇴 — 평소 33~60%' }] },
+  // A5 하락 규칙(2026-09-14 추가) — 상승만 보던 탓에 SKB RPKI 10.06%→6.95% 7일 지속을 놓쳤다(8/31~).
+  // -3%p 3일: 전 이력 백테스트에서 그 사건 1건만 잡고, KT·LG U+는 최대 하락이 0.49/0.43%p라 6배 여유.
+  // (-4%p면 그 사건조차 놓침 — 실제 낙폭이 3.10%p였다.)
   { id: 'A5', metric: 'rpkiValid', isps: KR3,
-    rules: [{ key: 'rise', cmp: 'rise_pp', th: 10, days: 3, meaning: 'RPKI 라우팅 경로 인증 적용 — 평소 한 자릿수에서 거의 고정' }] },
+    rules: [
+      { key: 'rise', cmp: 'rise_pp', th: 10, days: 3, meaning: 'RPKI 라우팅 경로 인증 적용 — 평소 한 자릿수에서 거의 고정' },
+      { key: 'drop', cmp: 'drop_pp', th: 3, days: 3, meaning: 'RPKI 경로 인증 후퇴 — 평소 ±0.5%p 내에서 고정, 3%p 하락은 정책·장비 변경 신호' },
+    ] },
   { id: 'A6', metric: 'packetLoss', isps: KR3,
     rules: [{ key: 'loss', cmp: 'gt0', th: 0, days: 2, meaning: '실제 패킷 손실 발생 — 3사 모두 88일 연속 0.000' }] },
   // S: 속도 저하(2026-09-09 추가). 사업자별 수준이 달라 절대 바닥 대신 '자기 직전 28일 중앙값 대비 하락률'.
@@ -158,6 +164,7 @@ function holds(p: Pt, r: Rule): boolean | null {
     case 'lte': return p.v <= r.th;
     case 'gt0': return p.v > 0;
     case 'rise_pp': return p.base == null ? null : p.v - p.base >= r.th; // 기준선 없으면 판정 불가
+    case 'drop_pp': return p.base == null ? null : p.base - p.v >= r.th;
     case 'drop_pct': return p.base == null || p.base <= 0 ? null : ((p.base - p.v) / p.base) * 100 >= r.th;
   }
 }
@@ -193,6 +200,7 @@ export interface EvalResult { state: AlertState; events: AlertEvent[]; checks: C
 
 const condText = (r: Rule, unit: string) =>
   r.cmp === 'rise_pp' ? `28일 중앙값 대비 +${r.th}%p 이상 · ${r.days}일 연속`
+  : r.cmp === 'drop_pp' ? `28일 중앙값 대비 -${r.th}%p 이상 하락 · ${r.days}일 연속`
   : r.cmp === 'drop_pct' ? `28일 중앙값 대비 -${r.th}% 이상 하락 · ${r.days}일 연속`
   : r.cmp === 'gt0' ? `0 초과 · ${r.days}일 연속`
   : `${r.cmp === 'gte' ? '≥' : '≤'} ${r.th}${unit} · ${r.days}일 연속`;
@@ -328,6 +336,70 @@ export function digestData(data: QualityData, cacheGeneratedAt: Record<string, s
 }
 const round1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
 
+// ---- 지난주 이탈 Top N (2026-09-14) ----
+// 주간 평균은 '수준'을 보여 주지만 하루 튐을 지운다(실측: 9/3 KT DNSSEC +37.9%가 주간 평균에선 +11.7%).
+// 그래서 평균 옆에 '그 주의 최대 단일일 이탈'을 따로 세운다 — 평균이 합으로 뭉갠 것을 최대값으로 되살리는 표.
+//
+// 기준선은 **같은 요일**의 최근 8개(최소 5개, 부족하면 28일 중앙값)로 잡는다. 요일 효과가 실재하기 때문 —
+// LG U+ IPv6는 주말이 평일보다 ~23% 높고 DNSSEC은 요일 진폭이 40%에 달한다. 28일 중앙값을 쓰면
+// 토요일마다 "LG U+ IPv6 +19%"가 떠서 표를 못 믿게 된다(2026-09-14 실측으로 확인하고 요일 보정 채택).
+const DEV_Z = 4;          // 자기 변동폭(robust z) 기준 — 3이면 0.005%p짜리 ipv6 KT 흔들림까지 올라온다
+const DEV_DOW_MIN = 5;    // 같은 요일 표본이 이보다 적으면 28일 중앙값으로 폴백
+const DEV_DOW_MAX = 8;
+const DEV_TOP_N = 5;
+
+export interface Deviation {
+  metricId: string; metric: string; isp: string; day: string; dow: string;
+  v: number; base: number; pct: number; z: number; byDow: boolean;
+}
+const DOW_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
+export function weekDeviations(data: QualityData, week: WeekWindow, metricIds: string[], isps = KR3): Deviation[] {
+  const axis = data.tiers.coarse.t;
+  const generated = Date.parse(data.generatedAt);
+  const best = new Map<string, Deviation>(); // (지표,ISP)별 최악의 하루만 — 지속 이동이면 한 줄이 7칸을 다 먹는다
+  for (const metricId of metricIds) for (const isp of isps) {
+    const blk = data.series[isp]?.[metricId]?.coarse;
+    if (!blk) continue;
+    const [v, , k] = blk;
+    const kGate = TRIGGERS.some((t) => t.metric === metricId && t.kGate);
+    for (let i = 0; i < axis.length; i++) {
+      const x = v[i];
+      if (x == null || axis[i] < week.from || axis[i] >= week.to || axis[i] + DAY > generated) continue;
+      if (kGate && k[i] != null) { // 저표본일 제외(트리거와 같은 게이트)
+        const kh: number[] = [];
+        for (let j = i - BASE_DAYS; j < i; j++) { const kk = k[j]; if (j >= 0 && kk != null) kh.push(kk); }
+        const km = med(kh);
+        if (kh.length >= 14 && km > 0 && (k[i] as number) < km * K_GATE_RATIO) continue;
+      }
+      const dow = new Date(axis[i]).getUTCDay();
+      const h28: number[] = [], hdow: number[] = [];
+      for (let j = i - 1; j >= 0 && axis[j] > axis[i] - 70 * DAY; j--) {
+        const y = v[j]; if (y == null) continue;
+        if (axis[j] > axis[i] - BASE_DAYS * DAY) h28.push(y);
+        if (new Date(axis[j]).getUTCDay() === dow && hdow.length < DEV_DOW_MAX) hdow.push(y);
+      }
+      if (h28.length < 14) continue;
+      const byDow = hdow.length >= DEV_DOW_MIN;
+      const ref = byDow ? hdow : h28;
+      const base = med(ref);
+      if (Math.abs(base) <= 1e-9) continue; // 0 기준 변화율은 무의미
+      const mad = med(ref.map((y) => Math.abs(y - base))) * 1.4826;
+      const dev = x - base;
+      // MAD=0(완전히 평평하던 계열)인데 값이 움직였으면 확실한 이탈 → z=∞ 취급
+      const z = mad > 0 ? Math.abs(dev) / mad : (Math.abs(dev) > 1e-12 ? Infinity : 0);
+      if (z < DEV_Z) continue;
+      const pct = (dev / base) * 100;
+      const key = `${metricId}:${isp}`;
+      const cur = best.get(key);
+      if (!cur || Math.abs(pct) > Math.abs(cur.pct)) {
+        best.set(key, { metricId, metric: metricLabel(metricId), isp, day: dayKey(axis[i]).slice(5), dow: DOW_KO[dow], v: x, base, pct, z, byDow });
+      }
+    }
+  }
+  return [...best.values()].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, DEV_TOP_N);
+}
+
 // 차트 임계선: 트리거 규칙을 지표별·ISP별 y값으로. 상대 규칙(rise_pp·drop_pct)은 주 마지막 날 기준 직전 28일 중앙값으로 환산.
 export function chartGuides(data: QualityData, week: WeekWindow): Record<string, Guide[]> {
   const out: Record<string, Guide[]> = {};
@@ -344,6 +416,7 @@ export function chartGuides(data: QualityData, week: WeekWindow): Record<string,
       case 'lte': y = r.th; label = `${trg.id} ≤ ${r.th}`; break;
       case 'gt0': y = 0; label = `${trg.id} > 0`; break;
       case 'rise_pp': { const b = baseline(isp, trg.metric); if (b != null) { y = b + r.th; label = `${trg.id} +${r.th}pp`; } break; }
+      case 'drop_pp': { const b = baseline(isp, trg.metric); if (b != null) { y = b - r.th; label = `${trg.id} -${r.th}pp`; } break; }
       case 'drop_pct': { const b = baseline(isp, trg.metric); if (b != null) { y = b * (1 - r.th / 100); label = `${trg.id} -${r.th}%`; } break; }
     }
     if (y != null) (out[trg.metric] ??= []).push({ isp, y, label });
@@ -376,6 +449,17 @@ export function buildReport(r: EvalResult, data: QualityData, cacheGeneratedAt: 
   out.push(`## 활성 알림 ${act.length}건`);
   for (const [k, a] of act) out.push(`- ${k} (since ${a.since.slice(0, 10)}) — ${a.detail}`);
   if (!act.length) out.push('- 없음');
+  if (week) {
+    const devs = weekDeviations(data, week, CHART_SPECS.map((s) => s.id));
+    out.push('', '### 지난주 이탈 Top 5 (하루 단위 · 같은 요일 평소값 대비)');
+    if (devs.length) {
+      out.push('| 날짜 | 지표 | 대상 | 그날 값 | 평소 | 이탈 |', '|---|---|---|---|---|---|');
+      for (const x of devs) {
+        const unit = METRIC_BY_ID[x.metricId]?.unit ?? '';
+        out.push(`| ${x.day}(${x.dow}) | ${x.metric} | ${ispName(x.isp)} | ${fmt(round1(x.v), unit)} | ${fmt(round1(x.base), unit)}${x.byDow ? '' : ' (28일)'} | ${x.pct > 0 ? '+' : ''}${x.pct.toFixed(1)}% (${x.z === Infinity ? '평소 완전히 일정하던 값' : `평소 변동의 ${x.z.toFixed(1)}배`}) |`);
+      }
+    } else out.push('특이 이탈 없음.');
+  }
   out.push('', digest(data, cacheGeneratedAt, now, week), '', '<details><summary>판정 상세</summary>', '',
     ...r.checks.map((c) => `- ${c.key} · ${c.metric} · ${c.group === 'D' ? c.target : ispName(c.target)} — 최근값 ${fmt(c.value, c.unit)} (${c.date}) → ${c.met ? '충족' : '미충족'}${c.active ? ' [활성]' : ''}`), '', '</details>');
   return out.join('\n');
@@ -398,6 +482,7 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
   const week = opts.week;
   const dg = digestData(data, cacheGeneratedAt, now, week);
   const wev = week ? weekEvents(r.state, week) : [];
+  const devs = week ? weekDeviations(data, week, CHART_SPECS.map((s) => s.id)) : [];
   const freshState = (f: DigestData['fresh'][number]) => f.ageH == null ? 'none' : f.ageH >= f.limitH ? 'over' : f.ageH >= f.limitH * 0.5 ? 'warn' : 'ok';
   const freshBad = dg.fresh.filter((f) => freshState(f) === 'over' || freshState(f) === 'none').length;
   const freshWarn = dg.fresh.filter((f) => freshState(f) === 'warn').length;
@@ -441,6 +526,18 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     dg.ranks.map((m) => `<tr>${td(`<b>${esc(m.short)}</b>`)}${m.cells.map((c) => rankCell(c, m.unit, m.hib)).join('')}</tr>`).join(''));
   const weekEventsHtml = wev.length ? wev.map(eventCard).join('')
     : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">지난주 발동·해소 이벤트 없음 — 트리거 전부 정상 범위였습니다.</div>`;
+  // 이탈 Top N — 평균이 지우는 하루 튐. 트리거가 안 울린 것(지속 조건 미달)도 여기엔 보인다.
+  const devHtml = devs.length
+    ? table(`<tr>${th('날짜', 'width:10%')}${th('지표', 'width:30%')}${th('대상', 'width:12%')}${th('그날 값', 'text-align:right;width:14%')}${th('평소(같은 요일)', 'text-align:right;width:16%')}${th('이탈', 'text-align:right;width:18%')}</tr>` +
+      devs.map((x) => {
+        const unit = METRIC_BY_ID[x.metricId]?.unit ?? '';
+        const worse = (METRIC_BY_ID[x.metricId]?.higherIsBetter ?? true) ? x.pct < 0 : x.pct > 0;
+        return `<tr>${td(`${esc(x.day)}<span style="color:${C.faint}">(${esc(x.dow)})</span>`, 'white-space:nowrap')}${td(esc(x.metric))}${td(esc(ispName(x.isp)), 'white-space:nowrap')}` +
+          `${td(`<b>${esc(fmt(round1(x.v), unit))}</b>`, 'text-align:right;white-space:nowrap')}` +
+          `${td(`<span style="color:${C.soft}">${esc(fmt(round1(x.base), unit))}</span>${x.byDow ? '' : `<div style="font-size:10px;color:${C.faint}">28일 기준</div>`}`, 'text-align:right;white-space:nowrap')}` +
+          `${td(`<b style="color:${worse ? C.bad : C.good}">${x.pct > 0 ? '▲' : '▼'} ${Math.abs(x.pct).toFixed(1)}%</b><div style="font-size:10px;color:${C.faint}">${x.z === Infinity ? '평소 완전히 일정하던 값' : `평소 변동의 ${x.z.toFixed(1)}배`}</div>`, 'text-align:right;white-space:nowrap')}</tr>`;
+      }).join(''))
+    : `<div style="padding:10px 12px;background:${C.card};border:1px solid ${C.line};border-radius:6px;font-size:13px;color:${C.soft};${FONT}">특이 이탈 없음 — 모든 지표가 요일별 평소 변동폭 안에서 움직였습니다.</div>`;
   // 판정 행 렌더러 — 전체 표(일별 메일)와 지표 카드(주간 메일) 양쪽에서 씀. withMetric=false 면 지표명 열을 생략(카드 제목에 이미 있음).
   const stateChip = (c: Check) => c.active ? chip('발동 중', C.bad, C.badSoft) : c.met ? chip('충족', C.warn, C.warnSoft) : chip('정상', C.ops, C.opsSoft);
   const checkRow = (c: Check, withMetric: boolean) => `<tr>${td(withMetric ? `<b style="color:${C.accent}">${esc(c.trigger)}</b> · <b>${esc(c.metric)}</b>` : `<b style="color:${C.accent}">${esc(c.trigger)}</b>`, withMetric ? '' : 'white-space:nowrap')}` +
@@ -491,6 +588,7 @@ export function buildMailHtml(r: EvalResult, data: QualityData, cacheGeneratedAt
     (week ? section(`지난주 이벤트 (${week.label})`, weekEventsHtml) + (r.events.length ? section('오늘 신규 이벤트', eventsHtml) : '') : section('이벤트', eventsHtml)) +
     section('활성 알림', activeHtml) +
     section('국내 3사 대표 지표 순위', ranksHtml, week ? `지난주 ${week.label} 일별 집계 평균 · 1위 초록 · 꼴찌 빨강 · 화살표는 전전주 대비 변화(초록=개선, 빨강=악화)` : '종합지표 패널과 같은 계산 · 1위 초록 · 꼴찌 빨강') +
+    (week ? section('지난주 이탈 Top 5 — 하루 단위', devHtml, '위 순위는 7일 평균이라 하루짜리 튐이 묻힙니다. 여기는 그 주의 가장 큰 단일일 이탈을 같은 요일 평소값과 비교해 보여 줍니다(요일 효과 제거). 트리거가 안 울렸어도(지속 조건 미달) 보입니다.') : '') +
     (week && opts.charts?.length ? section('지표별 지난주 추이 + 트리거 판정', metricCards, `진한 선·점 = 지난주 ${week.label} · 연한 선 = 1주 전 · 더 연한 선 = 2주 전 · 빨간 점선 = 아래 표의 트리거 임계값(상대 조건은 28일 기준선으로 환산) · 패널 눈금은 공유, 사업자 간 수준이 5배 이상 벌어지면 개별(own scale)`) : '') +
     section('수집 신선도', freshHtml) +
     section(week && opts.charts?.length ? '운영 트리거 판정 현황' : '트리거 판정 현황', checksHtml, '"정상" = 조건 미충족. "충족"은 조건은 넘었으나 아직 발동 처리 전, "발동 중"은 해소 전까지 재발송 없음') +

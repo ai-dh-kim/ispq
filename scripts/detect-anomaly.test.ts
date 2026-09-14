@@ -4,7 +4,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, chartGuides, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
+import { evaluate, emptyState, buildMailHtml, buildReport, digestData, prevWeekWindow, chartGuides, weekDeviations, TRIGGERS, CACHE_NAMES, KR3, type AlertState } from './detect-anomaly.ts';
 import { extractSeries, weeklyChartSvg, svgToPng, renderWeeklyCharts, CHART_ISPS } from './weekly-charts.ts';
 import { tmpdir } from 'node:os';
 import type { QualityData } from '../src/types.ts';
@@ -182,7 +182,54 @@ async function main() {
     const pngG = svgToPng(weeklyChartSvg(extractSeries(real, 'ipv6', w.from), ['a', 'b', 'c', 'd', 'e', 'f', 'g'], '%', [...(g.ipv6 ?? []), { isp: 'kt', y: 0.5, label: 'x <= 1 & y' }]));
     ok(pngG.length > 2000 && pngG[0] === 0x89, `임계 라벨(≤·<·&) 포함 PNG 변환 ${(pngG.length / 1024).toFixed(0)}KB`); }
 
-  console.log('\n[9] 정의 무결성');
+  console.log('\n[9] A5 하락 규칙 (2026-09-14 추가)');
+  { // 실데이터 검증: SKB RPKI가 8/31에 10.06%→6.95%로 떨어졌다. 그 시점(9/2 = 3일째)에 규칙이 있었다면 발동했어야 한다.
+    // generatedAt만 9/3으로 당기면 9/2까지가 '완결일'이 되어 당시 판정이 그대로 재현된다(부분일 제외 로직 이용).
+    const past = clone(real); past.generatedAt = '2026-09-03T00:00:00.000Z';
+    const rPast = run(past, emptyState(), Date.parse(past.generatedAt) + 2 * 3600000);
+    ok(rPast.events.some((e) => e.key === 'A5:skb:drop'), `사건 당시(9/2) 발동했을 것 — ${rPast.events.map((e) => e.key).join(',') || '없음'}`);
+    // 지금은 안 울린다: SKB가 7.32%로 일부 회복 + 28일 중앙값이 10.0으로 내려와 낙폭 2.68%p < 3%p.
+    // 롤링 기준선은 지속 이동을 서서히 '새 정상'으로 흡수한다 — 뒤늦게 규칙을 넣어도 소급 발동하지 않는다.
+    const r = run(real);
+    ok(!r.events.some((e) => e.key === 'A5:skb:drop'), '현재는 미발동 — 기준선이 이동을 흡수(소급 발동 없음)');
+    ok(!r.events.some((e) => e.key === 'A5:kt:drop' || e.key === 'A5:lgu:drop'), 'KT·LG U+는 미발동(최대 하락 0.5%p 수준)');
+    // 경계: -2.5%p면 미발동(임계 3%p)
+    const d = clone(real);
+    const v = d.series.lgu.rpkiValid.coarse[0], axis = d.tiers.coarse.t, gen = Date.parse(d.generatedAt);
+    const idx: number[] = []; for (let i = v.length - 1; i >= 0 && idx.length < 31; i--) if (v[i] != null && axis[i] + 86400000 <= gen) idx.push(i);
+    const base = median(idx.slice(3, 31).map((i) => v[i] as number));
+    for (const i of idx.slice(0, 3)) v[i] = base - 2.5;
+    ok(!run(d).events.some((e) => e.key === 'A5:lgu:drop'), '-2.5%p → 미발동 (임계 3%p)');
+    for (const i of idx.slice(0, 3)) v[i] = base - 3.5;
+    ok(run(d).events.some((e) => e.key === 'A5:lgu:drop'), '-3.5%p 3일 연속 → 발동');
+    // 차트 임계선에도 하락선이 그려져야 함
+    const g = chartGuides(real, prevWeekWindow(Date.UTC(2026, 8, 9, 0, 0)));
+    ok(g.rpkiValid?.filter((x) => x.label.includes('-3pp')).length === 3, `A5 하락 점선 3사분 (${g.rpkiValid?.map((x) => x.label).join(' ')})`); }
+
+  console.log('\n[10] 지난주 이탈 Top N');
+  { const w = prevWeekWindow(Date.UTC(2026, 8, 14, 0, 0)); // 9/14(월) → 지난주 9/7~9/13
+    const ids = ['latency', 'downloadBandwidth', 'uploadBandwidth', 'niaDl1g', 'niaUl1g', 'ipv6', 'dnssec', 'rpkiValid', 'packetLoss'];
+    const devs = weekDeviations(real, w, ids);
+    ok(devs.length > 0 && devs.length <= 5, `${devs.length}건 (상한 5) — ${devs.map((x) => `${x.day} ${x.metricId}/${x.isp} ${x.pct.toFixed(1)}%`).join(' · ')}`);
+    ok(new Set(devs.map((x) => `${x.metricId}:${x.isp}`)).size === devs.length, '(지표,ISP)별 1건씩 — 지속 이동이 표를 독점하지 않음');
+    ok(devs.every((x, i) => i === 0 || Math.abs(devs[i - 1].pct) >= Math.abs(x.pct)), '|이탈%| 내림차순 정렬');
+    ok(devs.every((x) => x.z >= 4), '전부 자기 변동폭의 4배 이상');
+    // 요일 효과 제거 확인: LG U+ IPv6 토요일(평소 주말이 +23%)은 올라오면 안 된다
+    ok(!devs.some((x) => x.metricId === 'ipv6' && x.isp === 'lgu'), '주말 효과(LG U+ IPv6 토/일)는 요일 기준선으로 걸러짐');
+    ok(devs.every((x) => x.byDow), '기준선은 같은 요일 표본 사용(byDow)');
+    // 합성 급락을 넣으면 1위로 올라와야 함
+    const d = clone(real);
+    const axis = d.tiers.coarse.t, v = d.series.kt.downloadBandwidth.coarse[0];
+    const hit = axis.findIndex((t) => t >= w.from + 2 * 86400000 && t < w.from + 3 * 86400000);
+    if (hit >= 0 && v[hit] != null) v[hit] = (v[hit] as number) * 0.5;
+    const d2 = weekDeviations(d, w, ids);
+    ok(d2[0]?.metricId === 'downloadBandwidth' && d2[0].isp === 'kt' && d2[0].pct < -40, `합성 -50% 급락이 1위 (${d2[0]?.pct.toFixed(1)}%)`);
+    const html = buildMailHtml(run(d), d, caches, now, { week: w });
+    ok(html.includes('지난주 이탈 Top 5') && html.includes('평소 변동의'), 'HTML 주간 메일에 이탈 표 포함');
+    const md = buildReport(run(d), d, caches, now, w);
+    ok(md.includes('### 지난주 이탈 Top 5'), 'markdown 보고서에도 포함'); }
+
+  console.log('\n[11] 정의 무결성');
   ok(TRIGGERS.every((t) => t.isps.every((i) => real.series[i]?.[t.metric])), '트리거의 모든 (isp, metric)이 데이터에 존재');
   ok(KR3.every((i) => real.series[i]), 'KR3 존재');
   ok(KR3.join() === CHART_ISPS.join() && KR3[0] === 'lgu', `순위표·판정 열 순서 = 차트 패널 순서 (${KR3.join(' · ')})`);
