@@ -358,7 +358,25 @@ function fillForward(sparse: Map<number, number>, stepMs: number): Map<number, n
   return out;
 }
 
+// 작업 목록을 동시성 상한 이하로 병렬 실행(입력 순서 무관, 각 작업이 자기 슬롯에만 씀).
+// 외부 패키지 없이(수집 스크립트 런타임 의존성 0 규칙) 워커 풀 방식.
+async function runPool(tasks: (() => Promise<void>)[], limit: number): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      await tasks[i]();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+}
+
+// 동시 호출 수. Radar rate-limit에 걸리면 cfGet의 429 백오프가 받아내지만, 그 전에 여기부터 낮출 것.
+const CF_CONCURRENCY = Math.max(1, Number(process.env.CF_CONCURRENCY) || 6);
+
 // cfCache[ispId][tierKey] = CfTierData. fine/mid/coarse 모두 채운다(fine은 15분 IQI를 10분 그리드에 forward-fill).
+// ISP 15 × 티어 3 × 지표 4 = 180회. 전부 순차 await 하던 것을 2026-09-21에 동시성 제한 병렬로 바꿨다
+// (Generate 단계가 크론 간격 10분에 닿아서 — 핸드오프 §10-2(a)). 호출 내용·결과는 그대로다.
 async function buildCfCache(now: number): Promise<Record<string, Partial<Record<TierKey, CfTierData>>>> {
   const cache: Record<string, Partial<Record<TierKey, CfTierData>>> = {};
   if (!CF_TOKEN) { console.log('[cf] CLOUDFLARE_API_TOKEN 없음 → 전부 시뮬레이션'); return cache; }
@@ -368,31 +386,38 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
     { key: 'coarse', agg: '1d', days: 90, stepMs: DAY },
   ];
   let ok = 0, fail = 0;
+  const tasks: (() => Promise<void>)[] = [];
   for (const isp of ALL_ISPS) {
     cache[isp.id] = {};
     for (const t of tiers) {
       const ds = isoSec(now - t.days * DAY);
       const de = isoSec(now);
       const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map(), ipv6: new Map(), dns: new Map() };
-      try {
-        const lat = await cfTimeseries(isp.asns, 'LATENCY', t.agg, ds, de, t.stepMs);
-        data.latency = lat.p50; ok++;
-      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/LATENCY skip: ${(e as Error).message}`); }
-      try {
+      cache[isp.id][t.key] = data; // 슬롯을 먼저 놓고, 각 작업은 자기 필드만 채운다.
+      // 한 호출이 실패해도 같은 셀의 나머지 지표는 살린다(순차판과 동일하게 지표별 try).
+      const step = async (label: string, run: () => Promise<void>) => {
+        try { await run(); ok++; }
+        catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/${label} skip: ${(e as Error).message}`); }
+      };
+      tasks.push(() => step('LATENCY', async () => {
+        data.latency = (await cfTimeseries(isp.asns, 'LATENCY', t.agg, ds, de, t.stepMs)).p50;
+      }));
+      tasks.push(() => step('BANDWIDTH', async () => {
         const bw = await cfTimeseries(isp.asns, 'BANDWIDTH', t.agg, ds, de, t.stepMs);
-        data.bandwidth = bw.p50; data.p25 = bw.p25; ok++;
-      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/BANDWIDTH skip: ${(e as Error).message}`); }
-      try {
-        const dns = await cfTimeseries(isp.asns, 'DNS', t.agg, ds, de, t.stepMs);
-        data.dns = dns.p50; ok++;
-      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/DNS skip: ${(e as Error).message}`); }
-      try {
-        data.ipv6 = await cfIpv6Timeseries(isp.asns, t.agg, ds, de, t.stepMs); ok++;
-      } catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/IPv6 skip: ${(e as Error).message}`); }
-      cache[isp.id][t.key] = data;
+        data.bandwidth = bw.p50; data.p25 = bw.p25;
+      }));
+      tasks.push(() => step('DNS', async () => {
+        data.dns = (await cfTimeseries(isp.asns, 'DNS', t.agg, ds, de, t.stepMs)).p50;
+      }));
+      tasks.push(() => step('IPv6', async () => {
+        data.ipv6 = await cfIpv6Timeseries(isp.asns, t.agg, ds, de, t.stepMs);
+      }));
     }
   }
-  console.log(`[cf] IQI 호출 완료 ok=${ok} fail=${fail}`);
+  const t0 = Date.now();
+  await runPool(tasks, CF_CONCURRENCY);
+  const sec = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`[cf] IQI 호출 완료 ok=${ok} fail=${fail} (${tasks.length}회 / 동시성 ${CF_CONCURRENCY} / ${sec}s)`);
   return cache;
 }
 
@@ -413,6 +438,7 @@ function timeAxis(now: number, baseMin: number, days: number): number[] {
 }
 
 async function main() {
+  const startedAt = Date.now();
   const now = Math.floor(Date.now() / GRID_MS) * GRID_MS;
   console.log('[mock] generating single multi-tier quality_data.json …');
 
@@ -562,6 +588,8 @@ async function main() {
   await writeFile(OUT, JSON.stringify(payload));
   const kb = Math.round(Buffer.byteLength(JSON.stringify(payload)) / 1024);
   console.log(`[mock] wrote ${points} points (live cells=${live}, liveMetrics=${[...liveMetricSet].join(',') || 'none'}) → ${OUT} (${(kb / 1024).toFixed(1)} MB)`);
+  // 전체 소요 — 위 [cf] 줄의 초와 비교하면 Cloudflare 호출이 차지하는 몫이 바로 보인다(§10-2a 추적용).
+  console.log(`[mock] 전체 소요 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
 }
 
 main().catch((err) => { console.error('[mock] fatal:', err); process.exit(1); });
