@@ -280,11 +280,11 @@ interface CfTierData { latency: Map<number, number>; bandwidth: Map<number, numb
 const cfLog = { done: false };
 const isoSec = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-// Cloudflare GET + 429(레이트리밋) 백오프 재시도. 호출이 많아도 데이터 빠짐 방지.
+// Cloudflare GET + 429(레이트리밋)·5xx 백오프 재시도. Radar는 멀쩡한 쿼리에도 가끔 500(code 2000/2005)을 돌려준다.
 async function cfGet(url: URL): Promise<any> {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${CF_TOKEN}` } });
-    if (res.status === 429 && attempt < 3) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+    if ((res.status === 429 || res.status >= 500) && attempt < 3) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
     if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 160)}`);
     return res.json();
   }
@@ -374,6 +374,23 @@ async function runPool(tasks: (() => Promise<void>)[], limit: number): Promise<v
 // 동시 호출 수. Radar rate-limit에 걸리면 cfGet의 429 백오프가 받아내지만, 그 전에 여기부터 낮출 것.
 const CF_CONCURRENCY = Math.max(1, Number(process.env.CF_CONCURRENCY) || 6);
 
+// 직전 실행의 quality_data.json — 호출이 재시도 후에도 실패한 시리즈를 빈칸 대신 직전 값으로 유지하는 데 쓴다.
+// 같은 쿼리가 몇 시간씩 연달아 500을 내기도 해서(dtag/mid/IPv6) 재시도만으론 빈칸이 남는다(2026-11-02 LG U+ 1시간 RTT 전체 공백).
+async function loadPrevious(): Promise<QualityData | null> {
+  try {
+    const prev = JSON.parse(await readFile(OUT, 'utf8')) as QualityData;
+    return prev.mode === 'live' ? prev : null; // 시뮬 값을 실데이터로 되살리지 않는다
+  } catch { return null; }
+}
+const CF_FIELD_METRIC = Object.fromEntries(Object.entries(CF_METRIC_FIELD).map(([metricId, field]) => [field, metricId]));
+function previousSeries(prev: QualityData | null, ispId: string, tier: TierKey, field: keyof CfTierData): Map<number, number> {
+  const out = new Map<number, number>();
+  const axis = prev?.tiers[tier]?.t;
+  const v = prev?.series[ispId]?.[CF_FIELD_METRIC[field]]?.[tier]?.[0];
+  if (axis && v) axis.forEach((t, i) => { const x = v[i]; if (x != null) out.set(t, x); });
+  return out;
+}
+
 // cfCache[ispId][tierKey] = CfTierData. fine/mid/coarse 모두 채운다(fine은 15분 IQI를 10분 그리드에 forward-fill).
 // ISP 15 × 티어 3 × 지표 4 = 180회. 전부 순차 await 하던 것을 2026-09-21에 동시성 제한 병렬로 바꿨다
 // (Generate 단계가 크론 간격 10분에 닿아서 — 핸드오프 §10-2(a)). 호출 내용·결과는 그대로다.
@@ -386,6 +403,7 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
     { key: 'coarse', agg: '1d', days: 90, stepMs: DAY },
   ];
   let ok = 0, fail = 0;
+  const prev = await loadPrevious();
   const tasks: (() => Promise<void>)[] = [];
   for (const isp of ALL_ISPS) {
     cache[isp.id] = {};
@@ -395,21 +413,26 @@ async function buildCfCache(now: number): Promise<Record<string, Partial<Record<
       const data: CfTierData = { latency: new Map(), bandwidth: new Map(), p25: new Map(), ipv6: new Map(), dns: new Map() };
       cache[isp.id][t.key] = data; // 슬롯을 먼저 놓고, 각 작업은 자기 필드만 채운다.
       // 한 호출이 실패해도 같은 셀의 나머지 지표는 살린다(순차판과 동일하게 지표별 try).
-      const step = async (label: string, run: () => Promise<void>) => {
+      const step = async (label: string, fields: (keyof CfTierData)[], run: () => Promise<void>) => {
         try { await run(); ok++; }
-        catch (e) { fail++; console.warn(`[cf] ${isp.id}/${t.key}/${label} skip: ${(e as Error).message}`); }
+        catch (e) {
+          fail++;
+          let kept = 0;
+          for (const f of fields) { data[f] = previousSeries(prev, isp.id, t.key, f); kept += data[f].size; }
+          console.warn(`[cf] ${isp.id}/${t.key}/${label} skip: ${(e as Error).message} → 직전 값 ${kept}개 유지`);
+        }
       };
-      tasks.push(() => step('LATENCY', async () => {
+      tasks.push(() => step('LATENCY', ['latency'], async () => {
         data.latency = (await cfTimeseries(isp.asns, 'LATENCY', t.agg, ds, de, t.stepMs)).p50;
       }));
-      tasks.push(() => step('BANDWIDTH', async () => {
+      tasks.push(() => step('BANDWIDTH', ['bandwidth', 'p25'], async () => {
         const bw = await cfTimeseries(isp.asns, 'BANDWIDTH', t.agg, ds, de, t.stepMs);
         data.bandwidth = bw.p50; data.p25 = bw.p25;
       }));
-      tasks.push(() => step('DNS', async () => {
+      tasks.push(() => step('DNS', ['dns'], async () => {
         data.dns = (await cfTimeseries(isp.asns, 'DNS', t.agg, ds, de, t.stepMs)).p50;
       }));
-      tasks.push(() => step('IPv6', async () => {
+      tasks.push(() => step('IPv6', ['ipv6'], async () => {
         data.ipv6 = await cfIpv6Timeseries(isp.asns, t.agg, ds, de, t.stepMs);
       }));
     }
