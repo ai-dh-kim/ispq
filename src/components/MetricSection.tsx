@@ -17,11 +17,14 @@ interface Props {
   sinceMs: number;
   theme: ThemeMode;
   colorIndex: (ispId: string) => number;
+  trendDays?: number; // 추이 보기(이동 중앙값) 일수, 0이면 하루 값
 }
 
 export default function MetricSection(props: Props) {
   const { metricId, view, data, selectedIsps, range } = props;
   const metric = METRIC_BY_ID[metricId];
+  // 추이 보기는 일별 지표(dailyCadence)에만 적용된다(MetricChart와 같은 조건).
+  const trend = metric.dailyCadence && props.trendDays ? props.trendDays : 0;
 
   // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
   const tier = metric.dailyCadence ? 'coarse' : RANGES[range].tier;
@@ -47,7 +50,7 @@ export default function MetricSection(props: Props) {
     <section className="panel metric-section" id={`metric-${metricId}`}>
       <h2>
         {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)`
-          : metric.dailyCadence ? T.chartTitle(metric.name, VIEWS['1day'].label)
+          : metric.dailyCadence ? T.chartTitle(metric.name, VIEWS['1day'].label) + (trend ? T.trendTitle(trend) : '')
           : T.chartTitle(metric.name, VIEWS[view].label)}
         {/* 근거 등급: 직접측정(A)은 기본이라 생략, 집계(B)·파생(C)만 표시해 주의 환기. */}
         {metric.cite.grade !== 'A' && (
@@ -72,6 +75,7 @@ export default function MetricSection(props: Props) {
         <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate, metric.windowNote)}{metric.noSamples ? ` ${T.noSampleNote}` : ''}</p>
       )}
       {metric.noSamples && !metric.dailyCadence && <p className="mlab-delay">ℹ {T.noSampleNote}</p>}
+      {trend > 0 && <p className="mlab-delay trend-note">{T.trendNotice(trend)}</p>}
       <MetricChart {...props} />
     </section>
   );

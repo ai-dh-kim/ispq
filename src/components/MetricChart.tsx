@@ -6,7 +6,7 @@
 import Chart from 'react-apexcharts';
 import { useMemo } from 'react';
 import type { ApexOptions } from 'apexcharts';
-import { aggregateSeries } from '../lib/aggregate.ts';
+import { aggregateSeries, rollingMedian } from '../lib/aggregate.ts';
 import { getTierPoints } from '../data/quality.ts';
 import { colorForIsp } from '../theme.ts';
 import { ISP_BY_ID, COMBINE_GROUPS, NIA_NAME_BY_ID } from '../data/isps.ts';
@@ -24,6 +24,8 @@ interface Props {
   sinceMs: number;
   theme: ThemeMode;
   colorIndex: (ispId: string) => number;
+  // 추이 보기(이동 중앙값) 창 일수. 0이면 하루 값 그대로. dailyCadence 지표에만 적용.
+  trendDays?: number;
 }
 
 const CHROME = {
@@ -100,7 +102,7 @@ function effectiveIsps(selected: string[]): string[] {
 interface PointMeta { total: number | null; trimmed: number | null; retained: number | null; low: boolean; }
 type DataPoint = { x: number; y: number | null; meta: PointMeta };
 
-export default function MetricChart({ metricId, data, selectedIsps, view, range, sinceMs, theme, colorIndex }: Props) {
+export default function MetricChart({ metricId, data, selectedIsps, view, range, sinceMs, theme, colorIndex, trendDays = 0 }: Props) {
   const metric = METRIC_BY_ID[metricId];
 
   // 월별 인덱스(nfSpeedIndex)는 상단 기간과 무관하게 항상 고정 180일(coarse·1일 버킷)로 표시.
@@ -111,6 +113,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
   // 1일 버킷 여부 — 툴팁 제목에서 무의미한 시:분(항상 00:00)을 생략하는 데 사용.
   const dateOnly = viewDef.baseMin >= 1440;
+  const TREND = DAILY && trendDays > 0 ? trendDays : 0;
 
   // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [effSince, maxMs]로 잡는다.
   // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.
@@ -128,7 +131,8 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     for (const ispId of effectiveIsps(selectedIsps)) {
       const base = getTierPoints(data, ispId, metricId, tier);
       // -Infinity: sinceMs로 자르지 않고 티어 전체를 차트에 공급.
-      const pts = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
+      const agg = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
+      const pts = TREND ? rollingMedian(agg, TREND) : agg;
       // 값이 하나도 없는 ISP는 차트에서 제외 — 전부 null인 시리즈가 끼면 ApexCharts 공유 툴팁의
       // 호버 마커가 일부 시리즈에만 찍히는 문제가 생기고(예: NIA 10G에서 케이블사 4개가 빈 시리즈),
       // 범례에도 죽은 항목이 남는다(2026-07-20).
@@ -151,7 +155,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       si++;
     }
     return { series, colors, discrete, dashArray, lastLiveMs: Number.isFinite(lastLiveMs) ? lastLiveMs : null };
-  }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex]);
+  }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex, TREND]);
 
   // 차트에 실린 포인트 수(티어 전체) — 저표본 점 표시 여부 판단에 사용.
   const pointCount = series[0]?.data.length ?? 0;
@@ -261,10 +265,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         // 크로스헤어 x를 pointsArray 인덱스로 계산하는데, null로 시리즈별 길이가 어긋나 바가 한 지점에
         // 붙박인다(실측: 커서와 무관하게 423px 고정). 호버 시점의 x(시각)는 정확히 알고 있으므로
         // 축 범위→픽셀로 직접 환산해 덮어쓴다. rAF로 미뤄 ApexCharts의 계산 뒤에 적용되게 한다.
-        return `<div class="qtt"><div class="qtt-title">${when}</div>${blocks}</div>`;
+        return `<div class="qtt"><div class="qtt-title">${when}${TREND ? T.trendTitle(TREND) : ''}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly, pointCount]);
+  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly, pointCount, TREND]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;

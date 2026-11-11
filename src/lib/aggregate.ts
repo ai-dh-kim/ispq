@@ -61,3 +61,25 @@ export function aggregateSeries(
   }
   return out;
 }
+
+const DAY_MS = 86400000;
+
+// 이동 중앙값(추이 보기): 각 날짜 = 그날 포함 직전 days일 하루 값의 중앙값.
+// 그날 값이 없으면 null(데이터가 끝난 뒤로 선을 연장하지 않음), 창 안 값이 절반 미만이어도 null.
+// 표본 수·저표본 표시는 하루 값의 속성이라 추이에서는 지운다.
+export function rollingMedian<P extends { t: number; v: number | null }>(pts: P[], days: number): P[] {
+  const need = Math.ceil(days / 2);
+  return pts.map((p, i) => {
+    let v: number | null = null;
+    if (p.v != null) {
+      const win: number[] = [];
+      for (let j = i; j >= 0 && pts[j].t > p.t - days * DAY_MS; j--) if (pts[j].v != null) win.push(pts[j].v as number);
+      if (win.length >= need) {
+        win.sort((a, b) => a - b);
+        const m = win.length >> 1;
+        v = win.length % 2 ? win[m] : (win[m - 1] + win[m]) / 2;
+      }
+    }
+    return { ...p, v, total: null, trimmed: null, retained: null, low: false };
+  });
+}

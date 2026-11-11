@@ -5,6 +5,15 @@ import type { TierKey } from './types.ts';
 // (180일·1년은 빈 구간만 보여 제거 — 2026-07-06. 데이터가 쌓이면 다시 추가 가능.)
 export type RangeKey = '24h' | '2d' | '7d' | '30d' | '90d';
 export type ViewKey = '10min' | '1hour' | '1day';
+// 일별 지표의 추이 보기(2026-11-11): 하루 값이 크게 출렁여(국내 Speed Test 하루 변화 중앙값 60~100Mbps)
+// 그래프를 읽기 어려워, 각 날짜에 '그날 포함 직전 N일 하루 값의 중앙값'(이동 중앙값)을 그리는 선택지.
+// 데이터는 그대로이고 화면 표시만 바뀐다. 중앙값이라 저표본일의 극단값에 덜 흔들린다.
+export type TrendKey = 'off' | '7d' | '28d';
+export const TRENDS: Record<TrendKey, { label: string; days: number }> = {
+  off: { label: '끔 (하루 값)', days: 0 },
+  '7d': { label: '7일 이동 중앙값', days: 7 },
+  '28d': { label: '28일 이동 중앙값', days: 28 },
+};
 
 const DAY = 86400000;
 
@@ -54,6 +63,10 @@ export const T = {
   metric: '지표',
   source: '출처',
   bucket: '집계 단위',
+  trend: '추이',
+  trendNotice: (days: number) =>
+    `📈 추이 보기: 각 점은 그날 포함 직전 ${days}일 하루 값의 중앙값(이동 중앙값)입니다. 하루 값은 상단 '추이'를 '끔'으로 바꾸면 볼 수 있습니다.`,
+  trendTitle: (days: number) => ` · ${days}일 추이`,
   range: '기간',
   themeDark: '다크',
   themeLight: '라이트',

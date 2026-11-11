@@ -4,8 +4,8 @@ import { useQualityData } from './data/quality.ts';
 import { METRICS, METRIC_BY_ID, DEFAULT_METRIC, SOURCES } from './data/metrics.ts';
 import { ALL_ISPS, NIA_ISPS } from './data/isps.ts';
 import {
-  RANGES, VIEWS, TIER_VIEWS, T,
-  type RangeKey, type ViewKey,
+  RANGES, VIEWS, TIER_VIEWS, TRENDS, T,
+  type RangeKey, type ViewKey, type TrendKey,
 } from './config.ts';
 import { loadSettings } from './lib/settings.ts';
 import { captureElement, timestampName } from './lib/screenshot.ts';
@@ -32,6 +32,8 @@ export default function App() {
   const [sourceId, setSourceId] = useState<string>(DEFAULT_SOURCE);
   const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
   const [view, setView] = useState<ViewKey>(DEFAULT_VIEW);
+  // 추이 보기(일별 지표 이동 중앙값). Speed Test 탭은 하루 값이 크게 출렁여 기본 7일 추이(2026-11-11).
+  const [trend, setTrend] = useState<TrendKey>('off');
   const [chartResetKey, setChartResetKey] = useState(0);
   const [ispPanelOpen, setIspPanelOpen] = useState(true);
   // 데이터 소스 URL은 고정(설정 모달은 2026-07-21 제거) — 저장된 값이 있으면 그대로 사용.
@@ -49,6 +51,7 @@ export default function App() {
   const handleReset = () => {
     setRange(DEFAULT_RANGE);
     setView(DEFAULT_VIEW);
+    setTrend(sourceId === 'cfspeed' ? '7d' : 'off');
     setChartResetKey((k) => k + 1);
   };
 
@@ -80,6 +83,8 @@ export default function App() {
   const sourceMetrics = useMemo(() => METRICS.filter((m) => m.source === sourceId), [sourceId]);
   // 출처의 모든 지표가 일별 집계(dailyCadence)면 집계단위를 1일로 고정 — 기간을 어떻게 바꿔도 1일만 표시.
   const dailySource = sourceMetrics.length > 0 && sourceMetrics.every((m) => m.dailyCadence);
+  // 일별 지표가 하나라도 있는 출처에서만 '추이' 선택을 보여 준다(그 지표들에만 적용).
+  const hasDailyMetric = sourceMetrics.some((m) => m.dailyCadence);
 
   const tier = RANGES[range].tier;
   const allowedViews = useMemo<ViewKey[]>(
@@ -122,6 +127,7 @@ export default function App() {
             // Speed Test·NIA는 하루 1회 집계 → 집계 1일로 자동 맞춤(집계단위는 이후에도 1일 고정).
             // 기간 기본값: Speed Test 90일 · NIA 30일(2026-07-16 사용자 지정) — 이후 기간은 자유 변경 가능.
             if (s === 'cfspeed') { setRange('90d'); setView('1day'); }
+            setTrend(s === 'cfspeed' ? '7d' : 'off');
             if (s === 'nia') { setRange('30d'); setView('1day'); }
           }}>
             {Object.values(SOURCES).map((src) => (
@@ -141,6 +147,14 @@ export default function App() {
             {allowedViews.map((k) => <option key={k} value={k}>{VIEWS[k].label}</option>)}
           </select>
         </label>
+
+        {hasDailyMetric && (
+          <label className="field">{T.trend}
+            <select value={trend} onChange={(e) => setTrend(e.target.value as TrendKey)}>
+              {Object.entries(TRENDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </label>
+        )}
 
         <button onClick={handleReset}>↺ {T.resetButton}</button>
 
@@ -210,6 +224,7 @@ export default function App() {
                 sinceMs={sinceMs}
                 theme={theme}
                 colorIndex={colorIndex}
+                trendDays={TRENDS[trend].days}
               />
             ))}
             </>
