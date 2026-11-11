@@ -99,8 +99,17 @@ function effectiveIsps(selected: string[]): string[] {
   return result;
 }
 
-interface PointMeta { total: number | null; trimmed: number | null; retained: number | null; low: boolean; }
+// daily/dailyN: 추이 보기에서 추이선 점에 붙이는 그날 하루 값과 측정 수(툴팁에 함께 표시).
+interface PointMeta { total: number | null; trimmed: number | null; retained: number | null; low: boolean; daily?: number | null; dailyN?: number | null; }
 type DataPoint = { x: number; y: number | null; meta: PointMeta };
+
+// '#rrggbb' → rgba(…, a). 추이 보기의 하루 값 선을 같은 색으로 옅게 그리는 데 사용.
+function withAlpha(color: string, a: number): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  return m ? `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})` : color;
+}
+const RAW_ALPHA = 0.28; // 추이 보기에서 하루 값 선의 불투명도
+const r2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
 export default function MetricChart({ metricId, data, selectedIsps, view, range, sinceMs, theme, colorIndex, trendDays = 0 }: Props) {
   const metric = METRIC_BY_ID[metricId];
@@ -121,12 +130,18 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const maxMs = axis && axis.length ? axis[axis.length - 1] : sinceMs;
   const effSince = FIXED180 ? maxMs - 180 * 86400000 : sinceMs;
 
-  const { series, colors, discrete, dashArray, lastLiveMs } = useMemo(() => {
-    const series: { name: string; data: DataPoint[] }[] = [];
-    const colors: string[] = [];
-    const dashArray: number[] = [];
-    const discrete: { seriesIndex: number; dataPointIndex: number; size: number; fillColor: string; strokeColor: string }[] = [];
-    let si = 0;
+  // 추이 보기(TREND)에서는 ISP마다 두 시리즈: ① 하루 값(같은 색 옅은 가는 선) ② 추이선(진한 선).
+  // 같은 축에 겹쳐 그려, 축 범위 차이로 '값이 달라 보이는' 착시 없이 추이가 하루 값 분포의 어디를 지나는지 보이게 한다
+  // (2026-11-11 사용자 요청). 하루 값을 먼저 넣어 추이선이 위에 그려지게 하고(rawCount 앞쪽 인덱스),
+  // 범례·툴팁은 추이선만 ISP당 한 줄로 보여 준다(하루 값은 툴팁 보조줄에).
+  // 점(마커)이 아닌 선으로 그리는 이유: 1년치 × ISP 수만큼 마커가 생기면 크로스헤어가 깨진다(§7-3).
+  const { series, colors, discrete, dashArray, widths, lastLiveMs, rawCount, legendNames, legendColors } = useMemo(() => {
+    const main: { name: string; data: DataPoint[] }[] = [];
+    const mainColors: string[] = [];
+    const mainDash: number[] = [];
+    const raw: { name: string; data: DataPoint[] }[] = [];
+    const rawColors: string[] = [];
+    const lowAt: { si: number; di: number; color: string }[] = [];
     let lastLiveMs = -Infinity; // 값이 있는 가장 최신 시점 — M-Lab 지표의 X축을 여기서 멈추는 데 사용.
     for (const ispId of effectiveIsps(selectedIsps)) {
       const base = getTierPoints(data, ispId, metricId, tier);
@@ -138,23 +153,38 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       // 범례에도 죽은 항목이 남는다(2026-07-20).
       if (!pts.some((p) => p.v != null)) continue;
       const color = colorForIsp(colorIndex(ispId), ispId);
-      series.push({
-        name: ISP_BY_ID[ispId]?.name || NIA_NAME_BY_ID[ispId] || ispId, // NIA 전용 케이블사는 별도 이름 맵
-        data: pts.map((p) => ({
+      const name = ISP_BY_ID[ispId]?.name || NIA_NAME_BY_ID[ispId] || ispId; // NIA 전용 케이블사는 별도 이름 맵
+      main.push({
+        name,
+        data: pts.map((p, di) => ({
           x: p.t,
-          y: p.v == null ? null : Math.round(p.v * 100) / 100,
-          meta: { total: p.total, trimmed: p.trimmed, retained: p.retained, low: p.low },
+          y: r2(p.v),
+          meta: { total: p.total, trimmed: p.trimmed, retained: p.retained, low: p.low,
+            ...(TREND ? { daily: r2(agg[di].v), dailyN: agg[di].total } : {}) },
         })),
       });
-      colors.push(color);
-      dashArray.push(DASH_BY_ISP[ispId] ?? DASH_PATTERN[si % DASH_PATTERN.length]); // ISP 고정 또는 인덱스 스타일
+      mainColors.push(color);
+      mainDash.push(DASH_BY_ISP[ispId] ?? DASH_PATTERN[(main.length - 1) % DASH_PATTERN.length]); // ISP 고정 또는 인덱스 스타일
+      if (TREND) {
+        raw.push({ name: `${name} (하루 값)`, data: agg.map((p) => ({ x: p.t, y: r2(p.v), meta: { total: null, trimmed: null, retained: null, low: false } })) });
+        rawColors.push(withAlpha(color, RAW_ALPHA));
+      }
       pts.forEach((p, di) => {
         if (p.v != null && p.t > lastLiveMs) lastLiveMs = p.t;
-        if (p.low) discrete.push({ seriesIndex: si, dataPointIndex: di, size: 5, fillColor: '#ffb300', strokeColor: color });
+        if (p.low) lowAt.push({ si: main.length - 1, di, color });
       });
-      si++;
     }
-    return { series, colors, discrete, dashArray, lastLiveMs: Number.isFinite(lastLiveMs) ? lastLiveMs : null };
+    const rawCount = raw.length;
+    const discrete = lowAt.map(({ si, di, color }) => ({ seriesIndex: rawCount + si, dataPointIndex: di, size: 5, fillColor: '#ffb300', strokeColor: color }));
+    return {
+      series: [...raw, ...main],
+      colors: [...rawColors, ...mainColors],
+      dashArray: [...raw.map(() => 0), ...mainDash],
+      widths: [...raw.map(() => 1), ...main.map(() => (TREND ? 2.5 : 2))],
+      discrete, rawCount,
+      legendNames: main.map((s) => s.name), legendColors: mainColors,
+      lastLiveMs: Number.isFinite(lastLiveMs) ? lastLiveMs : null,
+    };
   }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex, TREND]);
 
   // 차트에 실린 포인트 수(티어 전체) — 저표본 점 표시 여부 판단에 사용.
@@ -194,7 +224,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     },
     theme: { mode: theme },
     colors,
-    stroke: { width: 2, curve: FIXED180 ? 'stepline' : 'straight', dashArray },
+    stroke: { width: widths, curve: FIXED180 ? 'stepline' : 'straight', dashArray },
     // 평소엔 점 숨김(size 0), 호버 시 6으로 표시. discrete는 저표본 경고 마커(노란 점).
     // 참고: 포인트가 많은 차트(1시간 버킷 등)에서는 ApexCharts 4.3이 공유 툴팁의 호버 마커를
     // 커서에 가장 가까운 시리즈 하나에만 그린다(moveDynamicPointsOnHover의 pointsArray 처리 한계).
@@ -213,7 +243,11 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       labels: { formatter: (v: number) => (v == null ? '' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })) },
     },
     grid: { borderColor: chrome.grid, strokeDashArray: 3 },
-    legend: { position: 'bottom', showForSingleSeries: true },
+    // 추이 보기: 범례는 ISP당 한 줄(추이선 색). 하루 값 선과 짝이 어긋나지 않게 범례 클릭 숨김은 끈다.
+    legend: rawCount
+      ? { position: 'bottom', showForSingleSeries: true, customLegendItems: legendNames, markers: { fillColors: legendColors },
+          onItemClick: { toggleDataSeries: false }, onItemHover: { highlightDataSeries: false } }
+      : { position: 'bottom', showForSingleSeries: true },
     tooltip: {
       // 공유(shared) 툴팁: x축 기준으로 떠서 버킷 밀도와 무관하게 항상 동작하고,
       // 선택된 모든 ISP 값을 색상별로 함께 보여 준다 (단일 호버의 시리즈 오인 문제 해소).
@@ -233,8 +267,10 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         // 툴팁 행 순서를 그래프상 위치와 일치시킨다 — 값이 큰 시리즈가 위(그래프 상단)로.
         // Y축은 방향성과 무관하게 항상 값이 클수록 위이므로 y 내림차순이면 시각적 순서와 같다.
         // 원래 색은 시리즈 인덱스로 잡히므로 정렬 후에도 원 인덱스(i)를 유지해 색을 맞춘다. null은 아래로.
+        // 추이 보기에선 하루 값 시리즈(앞쪽 rawCount개)는 행으로 띄우지 않고 추이선 행의 보조줄에 싣는다.
         const order = cfg
           .map((s, i) => ({ s, i, y: s.data[dataPointIndex]?.y ?? null }))
+          .filter(({ i }) => i >= rawCount)
           .sort((a, b) => {
             if (a.y == null && b.y == null) return a.i - b.i;
             if (a.y == null) return 1;
@@ -250,7 +286,9 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
           const gradeStr = grade ? ` · ${grade}` : '';
           const valStr = pt.y == null ? '–' : `${pt.y} ${metric.unit}`;
           // 표본 수 미상(실측 percentile 데이터) → 차트 상단 공지(noSamples)에서 일괄 안내하므로 툴팁엔 생략.
-          const sub = (m == null || m.total == null)
+          const sub = m && m.daily !== undefined
+            ? `<div class="qtt-sub">${T.trendDailyLabel} ${m.daily == null ? '–' : `${m.daily} ${metric.unit}`}${m.dailyN != null ? ` · ${T.trendDailyN(m.dailyN)}` : ''}</div>`
+            : (m == null || m.total == null)
             ? ''
             : `<div class="qtt-sub">${T.tooltipTotal} ${m.total} · ${T.tooltipTrimmed} ${m.trimmed} · ${T.tooltipRetained} ${m.retained != null ? (m.retained * 100).toFixed(1) : '–'}% ${m.low ? `<span class="qtt-low-inline">${T.lowSampleWarn}</span>` : ''}</div>`;
           return `<div class="qtt-series">
@@ -268,7 +306,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
         return `<div class="qtt"><div class="qtt-title">${when}${TREND ? T.trendTitle(TREND) : ''}</div>${blocks}</div>`;
       },
     },
-  }), [theme, colors, discrete, dashArray, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly, pointCount, TREND]);
+  }), [theme, colors, discrete, dashArray, widths, rawCount, legendNames, legendColors, metric, chrome, xMin, xMax, FIXED180, yRange, dateOnly, pointCount, TREND]);
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;

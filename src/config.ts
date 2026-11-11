@@ -65,8 +65,10 @@ export const T = {
   bucket: '집계 단위',
   trend: '추이',
   trendNotice: (days: number) =>
-    `📈 추이 보기: 각 점은 그날 포함 직전 ${days}일 하루 값의 중앙값(이동 중앙값)입니다. 하루 값은 상단 '추이'를 '끔'으로 바꾸면 볼 수 있습니다.`,
+    `📈 추이 보기: 진한 선은 그날 포함 직전 ${days}일 하루 값의 중앙값(이동 중앙값), 같은 색의 옅은 가는 선은 하루 값입니다(같은 축). 하루 값만 보려면 상단 '추이'를 '끔'으로 바꾸세요.`,
   trendTitle: (days: number) => ` · ${days}일 추이`,
+  trendDailyLabel: '그날 하루 값',
+  trendDailyN: (n: number) => `측정 ${n.toLocaleString()}건`,
   range: '기간',
   themeDark: '다크',
   themeLight: '라이트',
