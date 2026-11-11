@@ -69,18 +69,25 @@ CREATE TEMP FUNCTION pctl(arr ARRAY<FLOAT64>, p FLOAT64) AS ((
   FROM (SELECT ARRAY(SELECT x FROM UNNEST(arr) x WHERE x IS NOT NULL ORDER BY x) AS s)));
 CREATE TEMP FUNCTION last20(arr ARRAY<FLOAT64>) AS (
   ARRAY(SELECT x FROM UNNEST(arr) x WITH OFFSET o WHERE o >= ARRAY_LENGTH(arr) - 20));
-WITH tests AS (
+WITH raw AS (
   SELECT date, clientASN,
     pctl(ARRAY(SELECT b FROM UNNEST(download.bps) b WHERE b > 0), 0.9) / 1e6 AS bd,
     pctl(ARRAY(SELECT b FROM UNNEST(upload.bps) b WHERE b > 0), 0.9) / 1e6 AS bu,
     pctl(latencyMs, 0.5) AS li,
-    GREATEST(pctl(last20(loadedLatencyMs.download), 0.5), pctl(last20(loadedLatencyMs.upload), 0.5)) AS ll,
-    jitterMs AS ji,
-    GREATEST(loadedJitterMs.download, loadedJitterMs.upload) AS jl,
+    pctl(last20(loadedLatencyMs.download), 0.5) AS dll, pctl(last20(loadedLatencyMs.upload), 0.5) AS ull,
+    jitterMs AS ji, loadedJitterMs.download AS djl, loadedJitterMs.upload AS ujl,
     packetLoss.lossRatio * 100 AS pl
   FROM \`measurement-lab.cloudflare.speedtest_speed1\`
   WHERE date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL ${KEEP_DAYS} DAY) AND DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
     AND clientASN IN (${ALL_ASNS})
+),
+tests AS (
+  -- GREATEST는 인자 하나라도 NULL이면 NULL이라, 다운·업 중 한쪽만 측정된 건이 통째로 빠졌다(2026-11-11 수정).
+  -- 한쪽이 없으면 있는 쪽 값을 쓴다(둘 다 없으면 NULL).
+  SELECT date, clientASN, bd, bu, li, ji, pl,
+    GREATEST(COALESCE(dll, ull), COALESCE(ull, dll)) AS ll,
+    GREATEST(COALESCE(djl, ujl), COALESCE(ujl, djl)) AS jl
+  FROM raw
 )
 SELECT m.isp, UNIX_MILLIS(TIMESTAMP(t.date)) AS day, COUNT(*) AS n,
   pctl(ARRAY_AGG(t.bd IGNORE NULLS), 0.5) AS bd, pctl(ARRAY_AGG(t.bu IGNORE NULLS), 0.5) AS bu,
@@ -124,6 +131,18 @@ async function main() {
   if (!KEY || !PROJECT) { console.error('[cfspeed-kr] MLAB_BQ_KEY / MLAB_BQ_PROJECT 없음 → 수집 불가(캐시 미변경)'); process.exit(1); }
   const token = await getAccessToken(JSON.parse(KEY));
   const t0 = Date.now();
+  // 문법 확인 모드(CFSPEED_DRY_RUN=1): BigQuery dryRun은 이 뷰의 비용을 0으로 잘못 내지만 SQL 문법·열 이름은 검증한다.
+  // 조회문을 고친 뒤 144GB짜리 실제 실행 없이 확인할 때 쓴다(과금 없음, 캐시 미변경).
+  if (process.env.CFSPEED_DRY_RUN === '1') {
+    const res = await fetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${PROJECT}/queries`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: QUERY, useLegacySql: false, location: 'US', dryRun: true }),
+    });
+    const j: any = await res.json();
+    if (!res.ok) throw new Error(`문법 확인 실패 ${res.status} ${JSON.stringify(j?.error?.message ?? j).slice(0, 400)}`);
+    console.log('[cfspeed-kr] 문법 확인 통과(dryRun, 과금 없음) — 결과 열:', (j.schema?.fields ?? []).map((f: any) => f.name).join(', '));
+    return;
+  }
   const { rows, billedGb } = await runQuery(token);
   console.log(`[cfspeed-kr] 과금 ${billedGb.toFixed(1)}GB (상한 ${MAX_BILLED_GB}GB) · ${rows.length}행 · ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 

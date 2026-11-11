@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: '7 14 * * 0'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '조회문 문법만 확인(과금 없음, 캐시 미변경). 조회문을 고친 뒤 실제 실행(약 144GB) 전에 사용'
+        type: boolean
+        default: false
 
 concurrency:
   group: collect-cfspeed-kr
@@ -33,9 +38,11 @@ jobs:
         env:
           MLAB_BQ_KEY: ${{ secrets.MLAB_BQ_KEY }}       # M-Lab 수집과 같은 서비스계정
           MLAB_BQ_PROJECT: ${{ secrets.MLAB_BQ_PROJECT }}
+          CFSPEED_DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
         run: node scripts/collect-cfspeed-kr.ts
 
       - name: Commit cache
+        if: github.event.inputs.dry_run != 'true'
         run: |
           git config user.name "quality-bot"
           git config user.email "quality-bot@users.noreply.github.com"
@@ -49,6 +56,7 @@ jobs:
           fi
 
       - name: Trigger data refresh (그래프 즉시 반영)
+        if: github.event.inputs.dry_run != 'true'
         run: |
           code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \

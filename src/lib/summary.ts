@@ -3,9 +3,10 @@
 // 정직성 원칙: 절대 임계값("몇 ms부터 나쁨")은 근거를 대기 어려우므로 쓰지 않고,
 // (1) 표시된 ISP 간 '상대 순위'와 (2) 자기 자신 대비 '변화율'만 보여 준다(측정값의 산술 비교 · 파생 C).
 //
-// 시간창은 '지금'이 아니라 지표별 마지막 실데이터 시점(lastMs) 기준(recentDays=N):
+// 시간창은 '지금'이 아니라 지표별로 표시된 ISP가 모두 데이터를 가진 마지막 날(lastMs) 기준(recentDays=N):
 //   최근 창 = (lastMs-N일, lastMs]  ·  기준 창 = (lastMs-(N+30)일, lastMs-N일]
-// → 발행 지연이 다른 지표(M-Lab ~2일, Speed Test 1일)끼리도 공정하게 비교된다.
+// → 발행 지연이 다른 지표(M-Lab ~2일, Speed Test 1일)끼리도, 갱신 주기가 다른 ISP(국내 Speed Test 주 1회)끼리도
+//   같은 달력 창으로 공정하게 비교된다.
 
 import type { QualityData } from '../types.ts';
 import { METRIC_BY_ID } from '../data/metrics.ts';
@@ -13,6 +14,8 @@ import { METRIC_BY_ID } from '../data/metrics.ts';
 const DAY = 86400000;
 export const DEFAULT_RECENT_DAYS = 7;
 const BASE_DAYS = 30;
+// 창의 끝을 맞출 때 '수집이 끊긴 ISP'로 보고 제외하는 뒤처짐 한도(국내 Speed Test 주간 갱신 최대 7일 + 여유).
+const STALE_DAYS = 14;
 
 // 요약 매트릭스에 올릴 대표 지표(열). 전 지표를 다 올리면 표가 임원 친화성을 잃는다 — 여기만 고치면 열이 바뀐다.
 // 2026-07-15 개편(사용자 지정): 다운/업은 같은 출처(Cloudflare Speed Test)로 통일해 비교 기준을 맞추고,
@@ -47,14 +50,20 @@ function windowMeans(
   const axis = data.tiers.coarse?.t ?? [];
   const out = new Map<string, { recent: number | null; base: number | null }>();
 
-  // 지표별 마지막 실데이터 시점: 표시된 ISP 중 가장 최신 non-null.
-  let lastMs = -Infinity;
+  // 창의 끝(lastMs) = 표시된 ISP들이 '모두' 데이터를 가진 가장 늦은 날 = ISP별 마지막 실데이터 시점의 최솟값.
+  // 2026-11-11 수정: 예전엔 가장 최신 ISP에 맞췄는데, 국내 Speed Test는 주 1회 갱신(최대 7일 늦음)이라
+  // '해외 포함' 시 국내 '최근 7일 평균'이 1~2일치로 계산돼 체크 여부에 따라 값이 달라졌다(KT 298 vs 348).
+  // 같은 달력 창으로 맞춰야 ISP 간 순위도 공정하다. 수집이 끊긴 ISP(가장 최신보다 STALE_DAYS 넘게 뒤처짐)는
+  // 창을 끌고 내려가지 않게 제외한다(그 ISP는 창 안에 값이 없어 '–'로 남는다).
+  const lasts: number[] = [];
   for (const isp of ispIds) {
     const v = data.series[isp]?.[metricId]?.coarse?.[0];
     if (!v) continue;
-    for (let i = v.length - 1; i >= 0; i--) if (v[i] != null) { if (axis[i] > lastMs) lastMs = axis[i]; break; }
+    for (let i = v.length - 1; i >= 0; i--) if (v[i] != null) { lasts.push(axis[i]); break; }
   }
-  if (!Number.isFinite(lastMs)) { for (const isp of ispIds) out.set(isp, { recent: null, base: null }); return out; }
+  if (!lasts.length) { for (const isp of ispIds) out.set(isp, { recent: null, base: null }); return out; }
+  const newest = Math.max(...lasts);
+  const lastMs = Math.min(...lasts.filter((t) => t >= newest - STALE_DAYS * DAY));
 
   const recentFrom = lastMs - recentDays * DAY;
   const baseFrom = lastMs - (recentDays + BASE_DAYS) * DAY;
