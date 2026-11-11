@@ -35,6 +35,15 @@ function patchTailVsBase(d: QualityData, isp: string, metric: string, n: number,
 
 async function main() {
   const real = JSON.parse(await readFile(resolve(PUBLIC, 'quality_data.json'), 'utf8')) as QualityData;
+  // 국내 Speed Test 다운·업로드는 2026-11-11부터 그날 하루 값이라(§20) 실데이터에서도 S1·S2가 수시로 충족된다.
+  // 이 테스트는 판정 로직을 검증하는 것이므로, 이 두 지표만 값을 중앙값으로 고정해 '조용한 기준 상태'를 만든다
+  // (다른 지표는 실데이터 그대로). 합성 하락도 이 고정 기준선 대비라 정확히 계산된다.
+  for (const isp of KR3) for (const m of ['downloadBandwidth', 'uploadBandwidth']) {
+    const v = real.series[isp]?.[m]?.coarse?.[0];
+    if (!v) continue;
+    const mid = median(v.filter((x): x is number => x != null));
+    for (let i = 0; i < v.length; i++) if (v[i] != null) v[i] = mid;
+  }
   const caches: Record<string, string | null> = {};
   for (const n of CACHE_NAMES) {
     // 첫 수집 전에는 파일이 없을 수 있다(cfspeed_daily 등 신규 캐시) → 실데이터 기준 판정이 흔들리지 않게 생성 시각으로 간주.
@@ -59,6 +68,8 @@ async function main() {
     { key: 'A4:skb:drop', mutate: (d) => patchTail(d, 'skb', 'dnssec', 7, () => 20) },
     { key: 'A5:lgu:rise', mutate: (d) => { const b = median(d.series.lgu.rpkiValid.coarse[0].filter((x): x is number => x != null).slice(-31, -3)); patchTail(d, 'lgu', 'rpkiValid', 3, () => b + 12); } },
     { key: 'A6:kt:loss', mutate: (d) => patchTail(d, 'kt', 'packetLoss', 2, () => 0.4) },
+    { key: 'S1:kt:drop', mutate: (d) => patchTailVsBase(d, 'kt', 'downloadBandwidth', 3, 0.85) },
+    { key: 'S2:skb:drop', mutate: (d) => patchTailVsBase(d, 'skb', 'uploadBandwidth', 3, 0.85) },
     { key: 'S3:lgu:drop', mutate: (d) => patchTailVsBase(d, 'lgu', 'niaDl1g', 3, 0.85) },
     { key: 'S4:kt:drop', mutate: (d) => patchTailVsBase(d, 'kt', 'niaUl1g', 3, 0.85) },
   ];
@@ -67,14 +78,6 @@ async function main() {
     const r = run(d);
     const keys = r.events.map((e) => e.key);
     ok(keys.includes(c.key) && r.events.length === 1, `${c.key} → ${keys.join(',') || '없음'}`);
-  }
-
-  // S1·S2는 발송 일시 중지(하루치 전환 후 기준 재설계 중): 조건을 충족해도 이벤트가 없어야 하고, 판정 현황엔 충족으로 남아야 한다.
-  for (const [key, isp, metric] of [['S1:kt:drop', 'kt', 'downloadBandwidth'], ['S2:skb:drop', 'skb', 'uploadBandwidth']] as const) {
-    // 하루치는 값 간격이 커서 보조 함수(위쪽 중앙값)와 판정(보간 중앙값)의 기준선 차이가 몇 %까지 난다 → 20% 하락으로 넉넉히.
-    const d = clone(real); patchTailVsBase(d, isp, metric, 3, 0.8);
-    const r = run(d); const chk = r.checks.find((c) => c.key === key);
-    ok(!r.events.some((e) => e.key === key) && !!chk?.met && chk.meaning.includes('발송 중지'), `${key} 충족 → 발송 중지라 이벤트 없음(판정 현황엔 충족 표시)`);
   }
 
   console.log('\n[3] 경계·게이트');

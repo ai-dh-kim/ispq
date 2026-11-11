@@ -253,3 +253,4 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .cite-pop a:hover { text-decoration: underline; }
 /* 측정 한계 등 유의점 한 줄 (출처 아래) */
 .cite-note { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text-dim); }
+.cite-note.cite-cum { color: var(--warn); font-weight: 600; }

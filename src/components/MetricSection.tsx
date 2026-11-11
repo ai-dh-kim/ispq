@@ -60,6 +60,8 @@ export default function MetricSection(props: Props) {
           <span className="cite-pop">
             {metric.cite.basis}{' '}
             <a href={metric.cite.url} target="_blank" rel="noopener noreferrer">{T.citeSource} ↗</a>
+            {/* 실제 1일 값이 아닌(누적·월별) 지표는 설명 맨 앞에 강조 — 일별 값으로 오해하지 않게(2026-11-11). */}
+            {metric.cumulativeNote && <span className="cite-note cite-cum">{metric.cumulativeNote}</span>}
             {metric.cite.note && <span className="cite-note">{metric.cite.note}</span>}
           </span>
         </span>
