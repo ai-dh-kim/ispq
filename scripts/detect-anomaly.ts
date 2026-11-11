@@ -56,6 +56,8 @@ export interface Trigger {
   metric: string;
   isps: string[];
   kGate?: boolean; // 표본수(k) 제공 지표에만 — 저표본일 판정 제외
+  // 발송 일시 중지(사유). 판정·보고서 표시는 그대로 하되 알림(fire)은 내지 않는다.
+  paused?: string;
   rules: Rule[]; // 규칙 간 OR. 각 규칙이 독립된 알림 키를 가진다(A2 상승/하락)
 }
 export const TRIGGERS: Trigger[] = [
@@ -82,9 +84,12 @@ export const TRIGGERS: Trigger[] = [
     rules: [{ key: 'loss', cmp: 'gt0', th: 0, days: 2, meaning: '실제 패킷 손실 발생 — 3사 모두 88일 연속 0.000' }] },
   // S: 속도 저하(2026-09-09 추가). 사업자별 수준이 달라 절대 바닥 대신 '자기 직전 28일 중앙값 대비 하락률'.
   // 다운로드는 접점(Speed Test)·망 내부(NIA) 두 지점 — 동시 발동이면 망 문제, S1만이면 접점·단말, S3만이면 망 내부.
-  { id: 'S1', metric: 'downloadBandwidth', isps: KR3,
+  // S1·S2 일시 중지(2026-11-11): 국내 Speed Test가 Radar 90일 누적 → 그날 하루 값으로 바뀌면서(§20) 하루하루 출렁임이 커졌다.
+  // 백테스트(최근 1년): 이 규칙 그대로면 사업자·지표별 9~17회, 합계 81회 발동. 7·14일 중앙값으로 매끄럽게 해도 57~78회.
+  // 기준을 새로 정할 때까지 판정만 하고 발송하지 않는다.
+  { id: 'S1', metric: 'downloadBandwidth', isps: KR3, paused: '하루치 전환 후 기준 재설계 중',
     rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '이용자 실측 다운로드 저하(국내 접점) — 140일 최대 하락 4.4%' }] },
-  { id: 'S2', metric: 'uploadBandwidth', isps: KR3,
+  { id: 'S2', metric: 'uploadBandwidth', isps: KR3, paused: '하루치 전환 후 기준 재설계 중',
     rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '이용자 실측 업로드 저하(국내 접점) — 140일 최대 하락 3.1%' }] },
   { id: 'S3', metric: 'niaDl1g', isps: KR3,
     rules: [{ key: 'drop', cmp: 'drop_pct', th: 10, days: 3, meaning: '정부 측정 1G 다운로드 저하(망 내부) — 43일 최대 하락 6.2%' }] },
@@ -228,13 +233,13 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
         const off = tail(pts, r, CLEAR_DAYS);
         const lastV = pts.length ? pts[pts.length - 1].v : null;
         const mname = METRIC_BY_ID[trg.metric]?.name ?? trg.metric;
-        if (!active[key] && on.all && on.last && on.first) {
+        if (!trg.paused && !active[key] && on.all && on.last && on.first) {
           fire(key, { trigger: trg.id, target: isp, since: dayKey(on.first.t), value: on.last.v,
             detail: `${ispName(isp)} ${mname} ${fmt(on.last.v, unit)} — ${condText(r, unit)}. ${r.meaning}` });
         } else if (active[key] && off.none && off.last) {
           clear(key, off.last.v, `${ispName(isp)} ${mname} ${fmt(off.last.v, unit)} — 조건 미충족 ${CLEAR_DAYS}일 연속, 해소`);
         }
-        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, metric: metricLabel(trg.metric), metricId: trg.metric, meaning: r.meaning, cond: condText(r, unit),
+        checks.push({ key, group: trg.id.startsWith('S') ? 'S' : 'A', trigger: trg.id, target: isp, metric: metricLabel(trg.metric), metricId: trg.metric, meaning: trg.paused ? `${r.meaning} · ⏸ 발송 중지(${trg.paused})` : r.meaning, cond: condText(r, unit),
           value: lastV, unit, date: pts.length ? dayKey(pts[pts.length - 1].t) : '데이터 없음', met: on.all, active: !!active[key] });
       }
     }

@@ -59,8 +59,6 @@ async function main() {
     { key: 'A4:skb:drop', mutate: (d) => patchTail(d, 'skb', 'dnssec', 7, () => 20) },
     { key: 'A5:lgu:rise', mutate: (d) => { const b = median(d.series.lgu.rpkiValid.coarse[0].filter((x): x is number => x != null).slice(-31, -3)); patchTail(d, 'lgu', 'rpkiValid', 3, () => b + 12); } },
     { key: 'A6:kt:loss', mutate: (d) => patchTail(d, 'kt', 'packetLoss', 2, () => 0.4) },
-    { key: 'S1:kt:drop', mutate: (d) => patchTailVsBase(d, 'kt', 'downloadBandwidth', 3, 0.85) },
-    { key: 'S2:skb:drop', mutate: (d) => patchTailVsBase(d, 'skb', 'uploadBandwidth', 3, 0.85) },
     { key: 'S3:lgu:drop', mutate: (d) => patchTailVsBase(d, 'lgu', 'niaDl1g', 3, 0.85) },
     { key: 'S4:kt:drop', mutate: (d) => patchTailVsBase(d, 'kt', 'niaUl1g', 3, 0.85) },
   ];
@@ -69,6 +67,14 @@ async function main() {
     const r = run(d);
     const keys = r.events.map((e) => e.key);
     ok(keys.includes(c.key) && r.events.length === 1, `${c.key} → ${keys.join(',') || '없음'}`);
+  }
+
+  // S1·S2는 발송 일시 중지(하루치 전환 후 기준 재설계 중): 조건을 충족해도 이벤트가 없어야 하고, 판정 현황엔 충족으로 남아야 한다.
+  for (const [key, isp, metric] of [['S1:kt:drop', 'kt', 'downloadBandwidth'], ['S2:skb:drop', 'skb', 'uploadBandwidth']] as const) {
+    // 하루치는 값 간격이 커서 보조 함수(위쪽 중앙값)와 판정(보간 중앙값)의 기준선 차이가 몇 %까지 난다 → 20% 하락으로 넉넉히.
+    const d = clone(real); patchTailVsBase(d, isp, metric, 3, 0.8);
+    const r = run(d); const chk = r.checks.find((c) => c.key === key);
+    ok(!r.events.some((e) => e.key === key) && !!chk?.met && chk.meaning.includes('발송 중지'), `${key} 충족 → 발송 중지라 이벤트 없음(판정 현황엔 충족 표시)`);
   }
 
   console.log('\n[3] 경계·게이트');
@@ -180,7 +186,8 @@ async function main() {
     const g = chartGuides(real, w);
     ok(g.ipv6?.some((x) => x.isp === 'kt' && x.y === 1 && x.label === 'A1 ≥ 1') && g.ipv6?.filter((x) => x.isp === 'lgu').length === 2, `임계선: ipv6 KT 1% · LGU 2개 (${g.ipv6?.map((x) => `${x.isp}:${x.label}`).join(' ')})`);
     const s1 = g.downloadBandwidth?.find((x) => x.isp === 'kt');
-    ok(!!s1 && s1.y > 200 && s1.y < 300 && s1.label === 'S1 -10%', `상대 임계 환산: S1 KT 기준선×0.9 = ${s1?.y.toFixed(1)}`);
+    // 국내 Speed Test가 하루치로 바뀌어(§20) 수준이 Radar 누적과 달라졌다 — 범위는 넉넉히, 환산 규칙(라벨)만 엄격히.
+    ok(!!s1 && s1.y > 100 && s1.y < 600 && s1.label === 'S1 -10%', `상대 임계 환산: S1 KT 기준선×0.9 = ${s1?.y.toFixed(1)}`);
     const svgG = weeklyChartSvg(ser, ['a', 'b', 'c', 'd', 'e', 'f', 'g'], 'Mbps', g.downloadBandwidth ?? []);
     ok((svgG.match(/stroke-dasharray/g) ?? []).length === 3 && svgG.includes('S1 -10%'), '차트에 임계 점선 3개(3사) + 라벨');
     const svgIpv6 = weeklyChartSvg(extractSeries(real, 'ipv6', w.from), ['a', 'b', 'c', 'd', 'e', 'f', 'g'], '%', g.ipv6 ?? []);
