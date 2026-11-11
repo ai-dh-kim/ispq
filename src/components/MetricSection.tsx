@@ -67,7 +67,7 @@ export default function MetricSection(props: Props) {
       {metric.mlabBased && <p className="mlab-delay">{T.mlabDelayNotice(lastLiveDate)}</p>}
       {/* 표본 수 미제공(noSamples): 툴팁에 ISP마다 반복하는 대신 여기 공지에 한 번만 — 일별 공지가 있으면 그 뒤에 이어 붙임. */}
       {metric.dailyCadence && (
-        <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate)}{metric.noSamples ? ` ${T.noSampleNote}` : ''}</p>
+        <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate, metric.windowNote)}{metric.noSamples ? ` ${T.noSampleNote}` : ''}</p>
       )}
       {metric.noSamples && !metric.dailyCadence && <p className="mlab-delay">ℹ {T.noSampleNote}</p>}
       <MetricChart {...props} />

@@ -101,9 +101,10 @@ export const T = {
   // M-Lab 기반 지표 차트별 지연 공지 (마지막 실데이터 날짜 포함)
   mlabDelayNotice: (last: string | null) =>
     `ℹ M-Lab 공개 데이터(BigQuery)는 약 1~2일 지연 발행됩니다. 그래서 최신 약 1~2일 구간은 비어 있고, X축은 새 M-Lab 데이터가 들어올 때만 진행됩니다${last ? ` (현재 마지막: ${last})` : ''}.`,
-  // 일별 수집(dailyCadence) 지표 공지 — Cloudflare Speed Test 등 하루 1회 스냅샷 데이터
-  dailyDelayNotice: (last: string | null) =>
-    `ℹ 이 지표는 하루 1회(전일분까지) 수집되는 일별 집계입니다. 항상 1일 버킷으로 표시되며, X축은 새 데이터가 들어올 때만 진행됩니다${last ? ` (현재 마지막: ${last})` : ''}.`,
+  // 일별 수집(dailyCadence) 지표 공지. window = 날짜별 값이 실제로 담는 기간(metrics.ts windowNote) —
+  // 출처가 하루치를 주지 않는 지표(누적 집계)를 "일별 값"으로 오해하지 않게 지표마다 따로 적는다(2026-11-11).
+  dailyDelayNotice: (last: string | null, window?: string) =>
+    `ℹ ${window ?? '각 날짜 값은 그날 하루의 값입니다.'} 항상 1일 버킷으로 표시되며, X축은 새 데이터가 들어올 때만 진행됩니다${last ? ` (현재 마지막: ${last})` : ''}.`,
   // 요약 패널 (종합지표)
   summaryTitle: '종합지표',
   summaryScopeKr: '대한민국 통신 3사',

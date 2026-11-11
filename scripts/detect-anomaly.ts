@@ -101,7 +101,11 @@ const D2_GROUPS: Record<string, string[]> = {
   nia: ['niaDl100', 'niaUl100', 'niaDl500', 'niaUl500', 'niaDl1g', 'niaUl1g', 'niaDl10g', 'niaUl10g'],
   apnic: ['dnssec'],
 };
-export const CACHE_NAMES = ['mlab', 'netflix', 'speedtest', 'iqi', 'apnic', 'steam', 'nia'];
+export const CACHE_NAMES = ['mlab', 'netflix', 'speedtest', 'iqi', 'apnic', 'steam', 'nia', 'cfspeed_daily'];
+// 캐시별 미갱신 허용 시간. 기본은 D1B_HOURS(일별 수집). 국내 Speed Test 하루치(cfspeed_daily)는 주 1회 수집이라
+// 7일 + 크론 지연·재시도 여유 2일(2026-11-11).
+export const CACHE_LIMIT_H: Record<string, number> = { cfspeed_daily: 9 * 24 };
+const limitH = (name: string) => CACHE_LIMIT_H[name] ?? D1B_HOURS;
 
 // ---- 상태/이벤트 ----
 export interface ActiveAlert { trigger: string; target: string; since: string; value: number | null; detail: string }
@@ -251,10 +255,10 @@ export function evaluate({ data, cacheGeneratedAt, now, prev }: EvalInput): Eval
     const key = `D1-b:${name}`;
     const g = cacheGeneratedAt[name];
     const ageH = g ? (now - Date.parse(g)) / HOUR : Infinity;
-    if (!active[key] && ageH >= D1B_HOURS) fire(key, { trigger: 'D1-b', target: name, since: g ?? nowIso, value: Number.isFinite(ageH) ? Math.round(ageH) : null, detail: `${name}_cache.json 이 ${Number.isFinite(ageH) ? `${(ageH / 24).toFixed(1)}일` : '기록 없음'} 미갱신 — 수집기 정지·API 규격 변경·엔드포인트 차단 의심` });
-    else if (active[key] && ageH < D1B_HOURS) clear(key, Math.round(ageH), `${name} 수집 재개(${ageH.toFixed(1)}h 전)`);
-    checks.push({ key, group: 'D', trigger: 'D1-b', target: name, metric: `${name}_cache.json 갱신 시각 (일별 수집)`, meaning: '해당 수집기 정지 — API 규격 변경·엔드포인트 차단', cond: `${D1B_HOURS}h 이상 미갱신`, value: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, unit: 'h',
-      date: g ? g.slice(0, 16).replace('T', ' ') + 'Z' : '파일 없음', met: ageH >= D1B_HOURS, active: !!active[key] });
+    if (!active[key] && ageH >= limitH(name)) fire(key, { trigger: 'D1-b', target: name, since: g ?? nowIso, value: Number.isFinite(ageH) ? Math.round(ageH) : null, detail: `${name}_cache.json 이 ${Number.isFinite(ageH) ? `${(ageH / 24).toFixed(1)}일` : '기록 없음'} 미갱신 — 수집기 정지·API 규격 변경·엔드포인트 차단 의심` });
+    else if (active[key] && ageH < limitH(name)) clear(key, Math.round(ageH), `${name} 수집 재개(${ageH.toFixed(1)}h 전)`);
+    checks.push({ key, group: 'D', trigger: 'D1-b', target: name, metric: `${name}_cache.json 갱신 시각 (${limitH(name) > D1B_HOURS ? '주간 수집' : '일별 수집'})`, meaning: '해당 수집기 정지 — API 규격 변경·엔드포인트 차단', cond: `${limitH(name)}h 이상 미갱신`, value: Number.isFinite(ageH) ? Math.round(ageH * 10) / 10 : null, unit: 'h',
+      date: g ? g.slice(0, 16).replace('T', ' ') + 'Z' : '파일 없음', met: ageH >= limitH(name), active: !!active[key] });
   }
 
   // D2: 출처 그룹의 전 사업자·전 값이 D2_DAYS 연속 완전 동일
@@ -330,7 +334,7 @@ export function digestData(data: QualityData, cacheGeneratedAt: Record<string, s
   }
   const fresh = [
     { name: 'quality_data', ageH: (now - Date.parse(data.generatedAt)) / HOUR, limitH: D1A_HOURS },
-    ...CACHE_NAMES.map((n) => { const g = cacheGeneratedAt[n]; return { name: n, ageH: g ? (now - Date.parse(g)) / HOUR : null, limitH: D1B_HOURS }; }),
+    ...CACHE_NAMES.map((n) => { const g = cacheGeneratedAt[n]; return { name: n, ageH: g ? (now - Date.parse(g)) / HOUR : null, limitH: limitH(n) }; }),
   ];
   return { ranks, fresh, week };
 }

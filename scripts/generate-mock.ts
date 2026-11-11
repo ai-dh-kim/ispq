@@ -49,6 +49,15 @@ async function loadSpeedCache(): Promise<SpeedCache | null> {
   try { return JSON.parse(await readFile(SPEED_CACHE, 'utf8')) as SpeedCache; }
   catch { return null; }
 }
+// 국내 3사 Speed Test "그날 하루" 캐시(collect-cfspeed-kr.ts, 주 1회, BigQuery 원자료) — 2026-11-11.
+// 위 Radar 캐시는 날짜별 값이 실제로 직전 90일 누적이라, 국내 3사는 이 캐시만 쓴다(Radar로 대체하지 않음 —
+// 하루치와 90일 누적이 한 선에 섞이면 안 되므로, 아직 안 들어온 최근 며칠은 빈칸으로 둔다).
+const CFSPEED_DAILY_CACHE = resolve(__dir, '../public/cfspeed_daily_cache.json');
+type DailySpeedCache = { perIsp: Record<string, Record<string, SpeedSnap & { n: number }>> };
+async function loadDailySpeedCache(): Promise<DailySpeedCache | null> {
+  try { return JSON.parse(await readFile(CFSPEED_DAILY_CACHE, 'utf8')) as DailySpeedCache; }
+  catch { return null; }
+}
 // Speed Test 지표 id → 캐시 필드 (부하 중 지터 jl만 미사용 — 지표 추가 시 여기만 확장).
 // pl은 API 원값이 이미 %단위(실데이터 분포로 검증) → 변환 없음.
 const SPEED_FIELD: Record<string, keyof SpeedSnap> = {
@@ -472,6 +481,8 @@ async function main() {
   if (netflix) console.log(`[netflix] 캐시 로드됨 (ISP ${netflix.size}개)`);
   const speed = await loadSpeedCache(); // Cloudflare Speed Test 일별 캐시
   if (speed) console.log(`[speed] 캐시 로드됨 (ISP ${Object.keys(speed.perIsp ?? {}).length}개)`);
+  const speedDaily = await loadDailySpeedCache(); // 국내 3사 Speed Test 하루치(주 1회)
+  if (speedDaily) console.log(`[speed-daily] 캐시 로드됨 (ISP ${Object.keys(speedDaily.perIsp ?? {}).length}개)`);
   const iqi = await loadIqiCache(); // IQI 일별 스냅샷 캐시(장기 보관 — 라이브 90일 밖 보완 + rpki)
   if (iqi) console.log(`[iqi] 캐시 로드됨 (ISP ${Object.keys(iqi.perIsp ?? {}).length}개)`);
   const apnic = await loadApnicCache(); // APNIC DNSSEC 일별 캐시
@@ -512,7 +523,7 @@ async function main() {
         (CF_METRIC_FIELD[metric.id] != null && (!!CF_TOKEN || !!iqi)) ||
         (IQI_DAILY_FIELD[metric.id] != null && !!iqi) ||
         (MLAB_FIELD[metric.id] != null && !!mlab) ||
-        (SPEED_FIELD[metric.id] != null && !!speed) ||
+        (SPEED_FIELD[metric.id] != null && (!!speed || !!speedDaily)) ||
         (metric.id === APNIC_METRIC && !!apnic) ||
         (metric.id === STEAM_METRIC && !!steam) ||
         (NIA_FIELD[metric.id] != null && !!nia) ||
@@ -529,7 +540,12 @@ async function main() {
           const cfReal = cfField ? cf[isp.id]?.[g.key]?.[cfField]?.get(t) : undefined;
           const spField = SPEED_FIELD[metric.id];
           // 일별 스냅샷: 버킷 t가 속한 날(UTC)의 값 (fine/mid 버킷엔 그 날 값이 반복 — dailyCadence 지표는 UI가 coarse 고정).
-          const spReal = spField ? speed?.perIsp?.[isp.id]?.[String(Math.floor(t / DAY) * DAY)]?.[spField] : undefined;
+          // 국내 3사는 하루치 캐시만(있으면 표본 수 n도), 그 외는 Radar 90일 누적 캐시.
+          const spDailyCell = spField && speedDaily?.perIsp?.[isp.id] ? speedDaily.perIsp[isp.id][String(Math.floor(t / DAY) * DAY)] : undefined;
+          const spReal = spField
+            ? (speedDaily?.perIsp?.[isp.id] ? spDailyCell?.[spField] : speed?.perIsp?.[isp.id]?.[String(Math.floor(t / DAY) * DAY)]?.[spField])
+            : undefined;
+          const spN = spDailyCell?.n ?? null;
           const mlField = MLAB_FIELD[metric.id];
           const mlReal = mlField ? mlab?.perIsp?.[isp.id]?.[g.key]?.[mlField]?.[String(t)] : undefined;
           const nfReal = metric.id === 'nfSpeedIndex' ? nfSpeedAt(netflix?.get(isp.id), t) : undefined;
@@ -568,7 +584,8 @@ async function main() {
             v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공
           } else if (spReal != null && Number.isFinite(spReal)) {
             const clamped = Math.min(Math.max(spReal, metric.hard.min), metric.hard.max);
-            v.push(round(clamped)); n.push(null); k.push(null); live++; liveMetricSet.add(metric.id); // 표본수 미제공 → 실측값 표기
+            // 국내 3사 하루치는 그날 측정 수(n)를 함께 싣는다. Radar 누적값은 표본수 미제공.
+            v.push(round(clamped)); n.push(spN); k.push(spN); live++; liveMetricSet.add(metric.id);
           } else if (mlReal && Number.isFinite(mlReal.v)) {
             const clamped = Math.min(Math.max(mlReal.v, metric.hard.min), metric.hard.max);
             v.push(round(clamped)); n.push(mlReal.n); k.push(mlReal.n); live++; liveMetricSet.add(metric.id);

@@ -36,7 +36,11 @@ function patchTailVsBase(d: QualityData, isp: string, metric: string, n: number,
 async function main() {
   const real = JSON.parse(await readFile(resolve(PUBLIC, 'quality_data.json'), 'utf8')) as QualityData;
   const caches: Record<string, string | null> = {};
-  for (const n of CACHE_NAMES) caches[n] = JSON.parse(await readFile(resolve(PUBLIC, `${n}_cache.json`), 'utf8')).generatedAt;
+  for (const n of CACHE_NAMES) {
+    // 첫 수집 전에는 파일이 없을 수 있다(cfspeed_daily 등 신규 캐시) → 실데이터 기준 판정이 흔들리지 않게 생성 시각으로 간주.
+    try { caches[n] = JSON.parse(await readFile(resolve(PUBLIC, `${n}_cache.json`), 'utf8')).generatedAt; }
+    catch { caches[n] = real.generatedAt; console.log(`  (참고) ${n}_cache.json 없음 — 생성 시각으로 간주`); }
+  }
   const now = Date.parse(real.generatedAt) + 2 * 3600000; // 생성 2시간 뒤 판정 가정
   const run = (d: QualityData, prev: AlertState = emptyState(), t = now, c = caches) => evaluate({ data: d, cacheGeneratedAt: c, now: t, prev });
 
@@ -101,6 +105,9 @@ async function main() {
   { const r = run(real, emptyState(), Date.parse(real.generatedAt) + 20 * 3600000); ok(!r.events.some((e) => e.key.startsWith('D1-a')), '20h → D1-a 미발동'); }
   { const c = { ...caches, steam: new Date(now - 80 * 3600000).toISOString() }; const r = run(real, emptyState(), now, c); ok(r.events.length === 1 && r.events[0].key === 'D1-b:steam', `steam 80h → ${r.events.map((e) => e.key).join(',')}`); }
   { const c = { ...caches, nia: null }; const r = run(real, emptyState(), now, c); ok(r.events.some((e) => e.key === 'D1-b:nia'), 'nia 캐시 없음 → D1-b:nia'); }
+  // 주간 수집(cfspeed_daily)은 허용 9일: 8일 미갱신은 정상, 10일이면 발동.
+  { const c = { ...caches, cfspeed_daily: new Date(now - 8 * 86400000).toISOString() }; const r = run(real, emptyState(), now, c); ok(!r.events.some((e) => e.key === 'D1-b:cfspeed_daily'), 'cfspeed_daily 8일 → 미발동(주간 수집)'); }
+  { const c = { ...caches, cfspeed_daily: new Date(now - 10 * 86400000).toISOString() }; const r = run(real, emptyState(), now, c); ok(r.events.some((e) => e.key === 'D1-b:cfspeed_daily'), 'cfspeed_daily 10일 → D1-b 발동'); }
   { // D2: steam 그룹 전 사업자 마지막 3일을 4일 전 값으로 고정
     const d = clone(real);
     for (const isp of d.isps) { const v = d.series[isp]?.steamDownload?.coarse?.[0]; if (!v) continue; const idx: number[] = []; for (let i = v.length - 1; i >= 0 && idx.length < 4; i--) if (v[i] != null) idx.push(i); if (idx.length === 4) for (const i of idx.slice(0, 3)) v[i] = v[idx[3]]; }
