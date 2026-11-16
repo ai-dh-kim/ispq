@@ -209,5 +209,5 @@ export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
   METRICS.map((m) => [m.id, m])
 );
 
-// 첫 진입 기본 = Cloudflare Radar 출처(이 지표가 속한 출처가 초기 선택됨).
-export const DEFAULT_METRIC = 'latency';
+// 첫 진입 기본 = Cloudflare Speed Test 출처(이 지표가 속한 출처가 초기 선택됨). 2026-11-16 Radar → Speed Test(사용자 지정).
+export const DEFAULT_METRIC = 'downloadBandwidth';
