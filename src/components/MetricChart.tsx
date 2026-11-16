@@ -24,7 +24,7 @@ interface Props {
   sinceMs: number;
   theme: ThemeMode;
   colorIndex: (ispId: string) => number;
-  // 추이 보기(이동 중앙값) 창 일수. 0이면 하루 값 그대로. dailyCadence 지표에만 적용.
+  // 추이 보기(이동 중앙값) 창 일수. 0이면 하루 값 그대로. 1일 버킷 차트에만 적용(월별 Netflix 제외).
   trendDays?: number;
 }
 
@@ -122,7 +122,8 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
   // 1일 버킷 여부 — 툴팁 제목에서 무의미한 시:분(항상 00:00)을 생략하는 데 사용.
   const dateOnly = viewDef.baseMin >= 1440;
-  const TREND = DAILY && trendDays > 0 ? trendDays : 0;
+  // 추이 보기: 1일 버킷으로 그리는 차트(일별 지표 포함)에만, 월별 Netflix(FIXED180) 제외(2026-11-16 확장 — 예전엔 일별 지표만).
+  const TREND = !FIXED180 && viewDef.baseMin >= 1440 && trendDays > 0 ? trendDays : 0;
 
   // 차트에는 티어의 전체 데이터를 싣고(아래 series), 초기 보기 범위만 [effSince, maxMs]로 잡는다.
   // → zoom-out/pan 시 선택 기간 바깥의 (티어에 로드된) 과거 데이터가 실제로 드러난다.

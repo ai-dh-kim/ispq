@@ -23,8 +23,8 @@ interface Props {
 export default function MetricSection(props: Props) {
   const { metricId, view, data, selectedIsps, range } = props;
   const metric = METRIC_BY_ID[metricId];
-  // 추이 보기는 일별 지표(dailyCadence)에만 적용된다(MetricChart와 같은 조건).
-  const trend = metric.dailyCadence && props.trendDays ? props.trendDays : 0;
+  // 추이 보기는 1일 버킷으로 그리는 차트(일별 지표 또는 집계 단위 1일)에만 적용, 월별 Netflix 제외(MetricChart와 같은 조건).
+  const trend = metricId !== 'nfSpeedIndex' && (metric.dailyCadence || view === '1day') && props.trendDays ? props.trendDays : 0;
 
   // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
   const tier = metric.dailyCadence ? 'coarse' : RANGES[range].tier;
@@ -51,7 +51,7 @@ export default function MetricSection(props: Props) {
       <h2>
         {metricId === 'nfSpeedIndex' ? `${metric.name} — 최근 180일(월별)`
           : metric.dailyCadence ? T.chartTitle(metric.name, VIEWS['1day'].label) + (trend ? T.trendTitle(trend) : '')
-          : T.chartTitle(metric.name, VIEWS[view].label)}
+          : T.chartTitle(metric.name, VIEWS[view].label) + (trend ? T.trendTitle(trend) : '')}
         {/* 근거 등급: 직접측정(A)은 기본이라 생략, 집계(B)·파생(C)만 표시해 주의 환기. */}
         {metric.cite.grade !== 'A' && (
           <span className={`grade-tag grade-${metric.cite.grade}`} title={T.gradeTip[metric.cite.grade]}>
