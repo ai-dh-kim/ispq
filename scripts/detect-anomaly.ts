@@ -26,7 +26,7 @@ const DATA_FILE = resolve(PUBLIC, 'quality_data.json');
 const STATE_FILE = resolve(PUBLIC, 'alerts.json');
 const REPORT_FILE = process.env.ALERT_REPORT ?? resolve(__dir, '../alert_report.md'); // Step Summary용(markdown)
 const REPORT_HTML = process.env.ALERT_REPORT_HTML ?? resolve(__dir, '../alert_report.html'); // 메일 본문용(인라인 스타일 HTML)
-const DASHBOARD_URL = 'https://ai-dh-kim.github.io/ispq/';
+const DASHBOARD_URL = 'https://ispquality.kr/'; // 2026-11-17 커스텀 도메인(예전 ai-dh-kim.github.io/ispq/는 자동 이동)
 const CHARTS_DIR = resolve(PUBLIC, 'alert_charts'); // 주간 추이 PNG(매주 덮어씀, 커밋됨)
 // 메일의 <img src>는 커밋 SHA 고정 raw URL이어야 하는데 SHA는 커밋 뒤에야 안다 → 자리표시자를 쓰고 워크플로가 sed로 치환.
 const CHART_BASE = process.env.ALERT_CHART_BASE ?? '__CHART_BASE__';
