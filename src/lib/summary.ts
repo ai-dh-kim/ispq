@@ -49,6 +49,11 @@ function windowMeans(
 ): Map<string, { recent: number | null; base: number | null }> {
   const axis = data.tiers.coarse?.t ?? [];
   const out = new Map<string, { recent: number | null; base: number | null }>();
+  // 아직 끝나지 않은 오늘(UTC) 하루는 몇 시간치뿐 → 평균·창 끝 계산에서 뺀다(차트와 같은 규칙, 2026-11-17).
+  // 일별 수집 지표(dailyCadence)는 완결된 하루 스냅샷이라 그대로 쓴다.
+  const genMs = Date.parse(data.generatedAt);
+  const partial = !METRIC_BY_ID[metricId]?.dailyCadence;
+  const usable = (i: number) => !(partial && axis[i] + DAY > genMs);
 
   // 창의 끝(lastMs) = 표시된 ISP들이 '모두' 데이터를 가진 가장 늦은 날 = ISP별 마지막 실데이터 시점의 최솟값.
   // 2026-11-11 수정: 예전엔 가장 최신 ISP에 맞췄는데, 국내 Speed Test는 주 1회 갱신(최대 7일 늦음)이라
@@ -59,7 +64,7 @@ function windowMeans(
   for (const isp of ispIds) {
     const v = data.series[isp]?.[metricId]?.coarse?.[0];
     if (!v) continue;
-    for (let i = v.length - 1; i >= 0; i--) if (v[i] != null) { lasts.push(axis[i]); break; }
+    for (let i = v.length - 1; i >= 0; i--) if (v[i] != null && usable(i)) { lasts.push(axis[i]); break; }
   }
   if (!lasts.length) { for (const isp of ispIds) out.set(isp, { recent: null, base: null }); return out; }
   const newest = Math.max(...lasts);
@@ -73,7 +78,7 @@ function windowMeans(
     if (v) {
       axis.forEach((t, i) => {
         const x = v[i];
-        if (x == null) return;
+        if (x == null || !usable(i)) return;
         if (t > recentFrom && t <= lastMs) { rSum += x; rN++; }
         else if (t > baseFrom && t <= recentFrom) { bSum += x; bN++; }
       });

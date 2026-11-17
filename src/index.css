@@ -82,10 +82,12 @@ label.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; 
 .theme-toggle { min-width: 90px; }
 
 /* ---- Layout ---- */
-.content { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px 20px; flex: 1; }
+.content { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; padding: 16px 20px; flex: 1; }
 /* ISP 패널 접힘 시 차트 영역을 넓힘 */
-.content.isp-collapsed { grid-template-columns: max-content 1fr; }
-@media (max-width: 900px) { .content { grid-template-columns: 1fr; } }
+.content.isp-collapsed { grid-template-columns: max-content minmax(0, 1fr); }
+/* 그리드 칸이 내용(차트·표의 고정 폭)만큼 늘어나 모바일에서 페이지가 가로로 넓어지던 문제 방지(2026-11-17) */
+.content > * { min-width: 0; }
+@media (max-width: 900px) { .content { grid-template-columns: minmax(0, 1fr); } }
 
 /* ISP 선택 패널 고정: 차트를 스크롤해도 왼쪽에 그대로 유지 */
 /* 고정하되 overflow는 두지 않음 — 안 그러면 ISP 드롭다운(absolute)이 사이드바 높이에 잘림 */
@@ -139,6 +141,9 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .chart-wrap { min-height: 380px; }
 
 .empty { color: var(--text-dim); padding: 40px; text-align: center; }
+/* 보이는 구간에 값이 없을 때 안내(차트 높이만큼 자리를 잡아 레이아웃이 튀지 않게) */
+.empty-window { min-height: 200px; display: flex; flex-direction: column; justify-content: center; gap: 8px; line-height: 1.6; border: 1px dashed var(--border); border-radius: 8px; margin: 8px 0; }
+.empty-window .empty-title { color: var(--text); font-weight: 600; }
 
 /* 실시간 데이터 지연 고지 (사이드바) */
 .delay-note { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; background: var(--surface-2); }
@@ -251,6 +256,11 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .cite-info:hover .cite-pop, .cite-info:focus-within .cite-pop { opacity: 1; visibility: visible; }
 .cite-pop a { color: var(--accent); text-decoration: none; white-space: nowrap; }
 .cite-pop a:hover { text-decoration: underline; }
+/* 좁은 화면: 팝오버(320px)가 아이콘 오른쪽으로 삐져나가 숨겨진 상태로도 페이지를 가로로 넓혔다(2026-11-17).
+   화면 기준(fixed)으로 좌우 16px 안에 펼친다 — fixed 요소는 페이지 폭에 영향을 주지 않는다. 세로 위치는 아이콘 바로 아래(정적 위치). */
+@media (max-width: 900px) {
+  .cite-pop { position: fixed; left: 16px; right: 16px; top: auto; width: auto; max-width: none; }
+}
 /* 측정 한계 등 유의점 한 줄 (출처 아래) */
 .cite-note { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); color: var(--text-dim); }
 .cite-note.cite-cum { color: var(--warn); font-weight: 600; }

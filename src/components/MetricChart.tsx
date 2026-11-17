@@ -108,17 +108,23 @@ function withAlpha(color: string, a: number): string {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
   return m ? `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${a})` : color;
 }
+const DAY_MS = 86400000;
 const RAW_ALPHA = 0.28; // 추이 보기에서 하루 값 선의 불투명도
 const r2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
 
 export default function MetricChart({ metricId, data, selectedIsps, view, range, sinceMs, theme, colorIndex, trendDays = 0 }: Props) {
   const metric = METRIC_BY_ID[metricId];
+  const genMs = Date.parse(data.generatedAt);
 
   // 월별 인덱스(nfSpeedIndex)는 상단 기간과 무관하게 항상 고정 180일(coarse·1일 버킷)로 표시.
   const FIXED180 = metricId === 'nfSpeedIndex';
   // 일별 수집(dailyCadence) 지표: 데이터가 하루 1스냅샷 → 버킷 선택과 무관하게 항상 coarse(1일 버킷).
   const DAILY = !!metric.dailyCadence;
-  const tier = FIXED180 || DAILY ? 'coarse' : RANGES[range].tier;
+  // 1일 버킷 차트(일별 지표 또는 집계 단위 1일, Netflix 제외). 2026-11-17: 집계 1일이면 기간과 무관하게
+  // 항상 1일 티어(coarse)에서 읽는다 — 예전엔 24시간·2일 기간에 10분 티어(2일치)를 1일로 묶어 점이 2~3개뿐이라
+  // 추이(7·28일 이동 중앙값)가 전부 비어 빈 차트가 됐다. 창도 일별 지표처럼 최소 7일로 넓힌다(아래 winMs).
+  const DAY1 = !FIXED180 && (DAILY || view === '1day');
+  const tier = FIXED180 || DAY1 ? 'coarse' : RANGES[range].tier;
   const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
   // 1일 버킷 여부 — 툴팁 제목에서 무의미한 시:분(항상 00:00)을 생략하는 데 사용.
   const dateOnly = viewDef.baseMin >= 1440;
@@ -147,7 +153,12 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
     for (const ispId of effectiveIsps(selectedIsps)) {
       const base = getTierPoints(data, ispId, metricId, tier);
       // -Infinity: sinceMs로 자르지 않고 티어 전체를 차트에 공급.
-      const agg = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
+      const agg0 = aggregateSeries(base, viewDef, data.tiers[tier].baseMin, -Infinity);
+      // 아직 끝나지 않은 오늘(UTC) 하루는 몇 시간치뿐이라 하루 값으로 보이면 오해 → 1일 버킷에서 뺀다(2026-11-17).
+      // 일별 수집 지표(dailyCadence)는 이미 완결된 하루 스냅샷이라 제외 대상이 아니다.
+      const agg = DAY1 && !DAILY
+        ? agg0.map((p) => (p.t + DAY_MS > genMs ? { ...p, v: null } : p))
+        : agg0;
       const pts = TREND ? rollingMedian(agg, TREND) : agg;
       // 값이 하나도 없는 ISP는 차트에서 제외 — 전부 null인 시리즈가 끼면 ApexCharts 공유 툴팁의
       // 호버 마커가 일부 시리즈에만 찍히는 문제가 생기고(예: NIA 10G에서 케이블사 4개가 빈 시리즈),
@@ -186,7 +197,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
       legendNames: main.map((s) => s.name), legendColors: mainColors,
       lastLiveMs: Number.isFinite(lastLiveMs) ? lastLiveMs : null,
     };
-  }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex, TREND]);
+  }, [data, selectedIsps, metricId, tier, viewDef, sinceMs, colorIndex, TREND, DAY1, DAILY, genMs]);
 
   // 차트에 실린 포인트 수(티어 전체) — 저표본 점 표시 여부 판단에 사용.
   const pointCount = series[0]?.data.length ?? 0;
@@ -197,13 +208,19 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   // 창 너비(선택 기간)는 유지하고 오른쪽 끝만 lastLiveMs로 당겨, 끝의 빈 구간이 안 보이게 한다.
   // dailyCadence는 하루 1회 집계 → 상단 기간 선택을 그대로 따름(cfspeed 선택 시 App.tsx가 30일로 자동 설정).
   // 단 24시간·2일처럼 너무 짧으면 점 1~2개뿐이라 창 하한만 7일로 보장.
-  const winMs = DAILY ? Math.max(RANGES[range].ms, 7 * 86400000) : RANGES[range].ms;
-  const lagCap = (!!metric.mlabBased || DAILY) && lastLiveMs != null && lastLiveMs < maxMs;
+  // 2026-11-17: 집계 1일 차트(DAY1)도 같은 규칙 — 오늘(미완성) 버킷을 뺐으므로 끝을 마지막 실데이터에 맞춘다.
+  const winMs = DAY1 ? Math.max(RANGES[range].ms, 7 * 86400000) : RANGES[range].ms;
+  const lagCap = (!!metric.mlabBased || DAY1) && lastLiveMs != null && lastLiveMs < maxMs;
   const xMax = lagCap ? (lastLiveMs as number) : maxMs;
-  const xMin = lagCap ? (lastLiveMs as number) - winMs : DAILY ? maxMs - winMs : effSince;
+  const xMin = lagCap ? (lastLiveMs as number) - winMs : DAY1 ? maxMs - winMs : effSince;
 
   // Y축 산정용 데이터 min/max는 '현재 화면에 보이는 X구간 [xMin,xMax]' 안에서만 구한다.
   // (티어 전체에서 구하면 화면 밖 스파이크가 축을 끌어올려 그래프가 작아 보임.)
+  // 보이는 구간에 값이 하나라도 있는지(값이 전부 0이어도 '있음' — 그래서 yRange와 따로 센다).
+  const hasVisible = useMemo(
+    () => series.some((s) => s.data.some((p) => p.y != null && p.x >= xMin && p.x <= xMax)),
+    [series, xMin, xMax],
+  );
   const yRange = useMemo(() => {
     let lo = Infinity, hi = -Infinity;
     for (const s of series) for (const p of s.data) {
@@ -311,6 +328,16 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
 
   if (selectedIsps.length === 0) {
     return <div className="empty">{T.emptyIsp}</div>;
+  }
+  // 보이는 구간에 값이 하나도 없으면 빈 축 대신 이유를 보여 준다(고장으로 오해하지 않게, 2026-11-17).
+  // 대표 사례: M-Lab은 1~2일 늦게 발행되고 10분 자료가 없어 24시간·2일 + 10분/1시간 집계에선 그릴 값이 없다.
+  if (!hasVisible) {
+    return (
+      <div className="empty empty-window">
+        <div className="empty-title">{T.emptyWindowTitle}</div>
+        <div>{metric.mlabBased ? T.emptyWindowMlab : T.emptyWindowGeneric}</div>
+      </div>
+    );
   }
 
   return (

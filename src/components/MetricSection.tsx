@@ -27,7 +27,8 @@ export default function MetricSection(props: Props) {
   const trend = metricId !== 'nfSpeedIndex' && (metric.dailyCadence || view === '1day') && props.trendDays ? props.trendDays : 0;
 
   // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
-  const tier = metric.dailyCadence ? 'coarse' : RANGES[range].tier;
+  // 2026-11-17: 집계 1일 차트도 coarse에서 읽는다(MetricChart의 DAY1과 같은 조건).
+  const tier = metric.dailyCadence || view === '1day' ? 'coarse' : RANGES[range].tier;
 
   // 지연 발행(M-Lab)·일별 수집(dailyCadence) 지표의 '마지막 실데이터' 날짜(공지에 표기). 선택 ISP 중 가장 최신 non-null 시점.
   const lastLiveDate = useMemo(() => {

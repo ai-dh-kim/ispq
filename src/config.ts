@@ -84,6 +84,10 @@ export const T = {
   retention: '보존',
   chartTitle: (metric: string, view: string) => `${metric} — ${view} 버킷`,
   emptyIsp: '하나 이상의 통신사를 선택하세요.',
+  // 보이는 구간에 값이 없을 때(고장이 아님을 알림, 2026-11-17)
+  emptyWindowTitle: '이 기간·집계 단위에는 표시할 값이 없습니다 (오류 아님)',
+  emptyWindowMlab: 'M-Lab 자료는 1~2일 늦게 발행되고 10분 단위 자료가 없습니다. 상단에서 기간을 7일 이상으로 늘리거나 집계 단위를 1일로 바꾸면 보입니다.',
+  emptyWindowGeneric: '선택한 기간에 아직 들어온 측정값이 없습니다. 상단에서 기간을 늘리거나 집계 단위를 1일로 바꿔 보세요.',
   loading: '불러오는 중…',
   loadError: '데이터를 불러오지 못했습니다',
   runMock: 'npm run mock 으로 quality_data.json 을 생성하세요.',
