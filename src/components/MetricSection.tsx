@@ -1,10 +1,10 @@
 // 한 지표(metric)에 대한 섹션: 차트.
 // 같은 출처의 지표들을 세로로 쌓아 한 페이지에서 스크롤로 보기 위한 단위.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import MetricChart from './MetricChart.tsx';
 import { METRIC_BY_ID } from '../data/metrics.ts';
-import { VIEWS, RANGES, T, type ViewKey, type RangeKey } from '../config.ts';
+import { VIEWS, RANGES, TRENDS, T, type ViewKey, type RangeKey } from '../config.ts';
 import type { QualityData } from '../types.ts';
 import type { ThemeMode } from '../theme.ts';
 
@@ -20,11 +20,20 @@ interface Props {
   trendDays?: number; // 추이 보기(이동 중앙값) 일수, 0이면 하루 값
 }
 
+// 차트별로 고를 수 있는 추이 일수(툴바 '추이'의 '끔' 제외 항목과 같다).
+const TREND_DAYS = Object.values(TRENDS).map((t) => t.days).filter((d) => d > 0);
+
 export default function MetricSection(props: Props) {
   const { metricId, view, data, selectedIsps, range } = props;
   const metric = METRIC_BY_ID[metricId];
   // 추이 보기는 1일 버킷으로 그리는 차트(일별 지표 또는 집계 단위 1일)에만 적용, 월별 Netflix 제외(MetricChart와 같은 조건).
-  const trend = metricId !== 'nfSpeedIndex' && (metric.dailyCadence || view === '1day') && props.trendDays ? props.trendDays : 0;
+  const trendable = metricId !== 'nfSpeedIndex' && (!!metric.dailyCadence || view === '1day');
+  // 차트별 추이 설정(2026-11-17 사용자 요청): 추이 공지 줄의 체크박스(켬/끔)와 일수(7·30일)로 지표마다 따로 고른다.
+  // 기본값은 상단 툴바 '추이' — 툴바 값을 바꾸면 모든 차트가 그 값으로 다시 맞춰진다(개별 설정은 그때 초기화).
+  const globalDays = props.trendDays ?? 0;
+  const [local, setLocal] = useState(() => ({ on: globalDays > 0, days: globalDays || TREND_DAYS[0] }));
+  useEffect(() => { setLocal({ on: globalDays > 0, days: globalDays || TREND_DAYS[0] }); }, [globalDays]);
+  const trend = trendable && local.on ? local.days : 0;
 
   // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
   // 2026-11-17: 집계 1일 차트도 coarse에서 읽는다(MetricChart의 DAY1과 같은 조건).
@@ -76,8 +85,22 @@ export default function MetricSection(props: Props) {
         <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate, metric.windowNote)}{metric.noSamples ? ` ${T.noSampleNote}` : ''}</p>
       )}
       {metric.noSamples && !metric.dailyCadence && <p className="mlab-delay">ℹ {T.noSampleNote}</p>}
-      {trend > 0 && <p className="mlab-delay trend-note">{T.trendNotice(trend)}</p>}
-      <MetricChart {...props} />
+      {trendable && (
+        <div className={`mlab-delay trend-note${trend ? '' : ' trend-off'}`}>
+          <label className="trend-toggle">
+            <input type="checkbox" checked={local.on}
+              onChange={(e) => setLocal((l) => ({ ...l, on: e.target.checked }))} />
+            {T.trendToggle}
+          </label>
+          {/* 일수를 고르면 꺼져 있어도 바로 켠다(고른 걸 바로 보게). */}
+          <select className="trend-days" value={local.days} aria-label="추이 일수"
+            onChange={(e) => setLocal({ on: true, days: Number(e.target.value) })}>
+            {TREND_DAYS.map((d) => <option key={d} value={d}>{d}일 이동 중앙값</option>)}
+          </select>
+          <span className="trend-text">{trend ? T.trendNotice(trend) : T.trendOffNotice}</span>
+        </div>
+      )}
+      <MetricChart {...props} trendDays={trend} />
     </section>
   );
 }

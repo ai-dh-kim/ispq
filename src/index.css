@@ -265,6 +265,13 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .tp-table th, .tp-table td { border: 1px solid var(--border); padding: 2px 6px; text-align: center; font-weight: 400; }
 .tp-table th { color: var(--text-dim); }
 .tp-table .tp-spike { color: var(--warn); font-weight: 700; }
+/* 차트별 추이 켬/끔 체크박스 + 일수 선택(추이 공지 줄 맨 앞) */
+.trend-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.trend-note .trend-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--text); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.trend-note .trend-toggle input { margin: 0; cursor: pointer; }
+.trend-note .trend-days { font-size: 11px; padding: 1px 4px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.trend-note .trend-text { flex: 1 1 260px; min-width: 0; }
+.trend-note.trend-off { border-left-color: var(--border); }
 @media (max-width: 900px) { .trend-pop { left: 8px; right: 8px; width: auto; max-height: 70vh; overflow-y: auto; } .tp-table { font-size: 10px; } .tp-table th, .tp-table td { padding: 2px 3px; } }
 /* 좁은 화면: 팝오버(320px)가 아이콘 오른쪽으로 삐져나가 숨겨진 상태로도 페이지를 가로로 넓혔다(2026-11-17).
    아이콘 대신 감싸는 패널(.panel) 기준으로 좌우 폭에 맞춰 펼친다(패널은 화면 폭 안). 세로는 아이콘 줄 바로 아래(정적 위치 + 여백).

@@ -122,7 +122,7 @@ export default function MetricChart({ metricId, data, selectedIsps, view, range,
   const DAILY = !!metric.dailyCadence;
   // 1일 버킷 차트(일별 지표 또는 집계 단위 1일, Netflix 제외). 2026-11-17: 집계 1일이면 기간과 무관하게
   // 항상 1일 티어(coarse)에서 읽는다 — 예전엔 24시간·2일 기간에 10분 티어(2일치)를 1일로 묶어 점이 2~3개뿐이라
-  // 추이(7·28일 이동 중앙값)가 전부 비어 빈 차트가 됐다. 창도 일별 지표처럼 최소 7일로 넓힌다(아래 winMs).
+  // 추이(7·30일 이동 중앙값)가 전부 비어 빈 차트가 됐다. 창도 일별 지표처럼 최소 7일로 넓힌다(아래 winMs).
   const DAY1 = !FIXED180 && (DAILY || view === '1day');
   const tier = FIXED180 || DAY1 ? 'coarse' : RANGES[range].tier;
   const viewDef = FIXED180 || DAILY ? VIEWS['1day'] : VIEWS[view];
