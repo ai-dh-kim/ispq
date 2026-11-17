@@ -12,6 +12,7 @@ import { captureElement, timestampName } from './lib/screenshot.ts';
 import IspMultiSelect from './components/IspMultiSelect.tsx';
 import MetricSection from './components/MetricSection.tsx';
 import SummaryPanel from './components/SummaryPanel.tsx';
+import TrendHelp from './components/TrendHelp.tsx';
 
 // 선언 순서 기반 ISP 색상 인덱스.
 const COLOR_INDEX: Record<string, number> = Object.fromEntries(ALL_ISPS.map((i, idx) => [i.id, idx]));
@@ -151,7 +152,7 @@ export default function App() {
         </label>
 
         {trendAvailable && (
-          <label className="field">{T.trend}
+          <label className="field"><span>{T.trend}<TrendHelp days={TRENDS[trend].days || 7} /></span>
             <select value={trend} onChange={(e) => setTrend(e.target.value as TrendKey)}>
               {Object.entries(TRENDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>

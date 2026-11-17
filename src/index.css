@@ -256,16 +256,16 @@ aside.panel { position: sticky; top: 12px; align-self: start; }
 .cite-info:hover .cite-pop, .cite-info:focus-within .cite-pop { opacity: 1; visibility: visible; }
 .cite-pop a { color: var(--accent); text-decoration: none; white-space: nowrap; }
 .cite-pop a:hover { text-decoration: underline; }
-/* 추이 공지의 'ⓘ 자세히' 팝오버(TrendHelp) — 표·여러 문단이라 일반 출처 팝오버보다 넓게 */
-.trend-help { margin-left: 2px; color: var(--accent); font-size: 11px; font-weight: 600; }
-.trend-pop { max-width: 460px; width: 460px; font-size: 11.5px; color: var(--text); }
+/* 툴바 '추이' 라벨 옆 ⓘ 팝오버(TrendHelp) — 표·여러 문단이라 일반 출처 팝오버보다 넓게 */
+.trend-help { margin-left: 5px; font-size: 12px; }
+.trend-pop { left: auto; right: 0; max-width: 460px; width: 460px; font-size: 11.5px; color: var(--text); }
 .trend-pop .tp-h { display: block; font-weight: 700; font-size: 12.5px; margin-bottom: 6px; }
 .trend-pop .tp-row { display: block; margin-top: 6px; }
 .tp-table { border-collapse: collapse; margin: 4px 0 2px; font-size: 11px; }
 .tp-table th, .tp-table td { border: 1px solid var(--border); padding: 2px 6px; text-align: center; font-weight: 400; }
 .tp-table th { color: var(--text-dim); }
 .tp-table .tp-spike { color: var(--warn); font-weight: 700; }
-@media (max-width: 900px) { .trend-pop { width: auto; max-height: 70vh; overflow-y: auto; } .tp-table { font-size: 10px; } .tp-table th, .tp-table td { padding: 2px 3px; } }
+@media (max-width: 900px) { .trend-pop { left: 8px; right: 8px; width: auto; max-height: 70vh; overflow-y: auto; } .tp-table { font-size: 10px; } .tp-table th, .tp-table td { padding: 2px 3px; } }
 /* 좁은 화면: 팝오버(320px)가 아이콘 오른쪽으로 삐져나가 숨겨진 상태로도 페이지를 가로로 넓혔다(2026-11-17).
    아이콘 대신 감싸는 패널(.panel) 기준으로 좌우 폭에 맞춰 펼친다(패널은 화면 폭 안). 세로는 아이콘 줄 바로 아래(정적 위치 + 여백).
    (처음엔 position: fixed로 했으나 fixed + top:auto는 문서 기준 위치로 잡혀 스크롤하면 팝오버가 화면 밖에 떴다.) */

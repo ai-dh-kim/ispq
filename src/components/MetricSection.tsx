@@ -3,7 +3,6 @@
 
 import { useMemo } from 'react';
 import MetricChart from './MetricChart.tsx';
-import TrendHelp from './TrendHelp.tsx';
 import { METRIC_BY_ID } from '../data/metrics.ts';
 import { VIEWS, RANGES, T, type ViewKey, type RangeKey } from '../config.ts';
 import type { QualityData } from '../types.ts';
@@ -77,10 +76,7 @@ export default function MetricSection(props: Props) {
         <p className="mlab-delay">{T.dailyDelayNotice(lastLiveDate, metric.windowNote)}{metric.noSamples ? ` ${T.noSampleNote}` : ''}</p>
       )}
       {metric.noSamples && !metric.dailyCadence && <p className="mlab-delay">ℹ {T.noSampleNote}</p>}
-      {/* 추이 공지: 'ⓘ 자세히'에 마우스를 올리면 1일 값과 이동 중앙값의 차이 설명 팝오버(TrendHelp). */}
-      {trend > 0 && (
-        <div className="mlab-delay trend-note">📈 추이 보기 <TrendHelp days={trend} />: {T.trendNotice(trend)}</div>
-      )}
+      {trend > 0 && <p className="mlab-delay trend-note">{T.trendNotice(trend)}</p>}
       <MetricChart {...props} />
     </section>
   );

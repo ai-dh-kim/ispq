@@ -1,4 +1,5 @@
-// 추이 공지의 'ⓘ 자세히' 팝오버 — 1일 값과 N일 이동 중앙값의 차이 설명(2026-11-17 사용자 요청).
+// 상단 툴바 '추이' 라벨 옆 ⓘ 팝오버 — 1일 값과 N일 이동 중앙값의 차이 설명(2026-11-17 사용자 요청).
+// 처음엔 차트마다 달았으나 사용자 요청으로 툴바 한 곳으로 옮김. 툴바 오른쪽이라 팝오버는 아이콘 기준 왼쪽으로 펼친다(.trend-pop).
 // 지표 제목 옆 ⓘ와 같은 팝오버 방식(.cite-info/.cite-pop): 마우스를 올리거나(데스크톱) 탭하면(모바일, focus) 뜬다.
 // 예시 표는 계산 규칙을 보여 주는 고정 예시(7일)이고, 본문의 일수·반응 지연은 선택한 추이(7·28일)를 따른다.
 
@@ -12,8 +13,9 @@ const EX_MEAN = Math.round(EX.reduce((s, x) => s + x, 0) / EX.length);
 
 export default function TrendHelp({ days }: { days: number }) {
   return (
-    <span className="cite-info trend-help" tabIndex={0} aria-label="1일 값과 추이의 차이">
-      ⓘ 자세히
+    // label 안에 있으므로 클릭이 셀렉트로 넘어가 목록이 열리지 않게 막는다(설명만 보이게).
+    <span className="cite-info trend-help" tabIndex={0} aria-label="1일 값과 추이의 차이" onClick={(e) => e.preventDefault()}>
+      ⓘ
       <span className="cite-pop trend-pop">
         <span className="tp-h">1일 값과 {days}일 이동 중앙값의 차이</span>
 
