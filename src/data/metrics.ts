@@ -35,6 +35,9 @@ export interface MetricDef {
   // 실데이터가 '하루 1회 스냅샷'(일별 집계)으로만 수집되는 지표(예: Cloudflare Speed Test 캐시).
   //  (1) 차트를 항상 coarse(1일 버킷)로 표시  (2) X축을 마지막 실데이터에서 멈춤  (3) 일별 수집 공지 표시.
   dailyCadence?: boolean;
+  // 추이(이동 중앙값)를 기본으로 끄고 하루 값으로 보여 줄 지표(2026-11-17 사용자 지정). 상단 '추이' 값과 무관하게 체크 해제로 시작하며,
+  // 차트의 체크박스로 켤 수 있다. 값이 거의 0·100에 붙거나(패킷손실·RPKI) 원자료가 이미 누적이라(NIA·Steam) 추이가 의미 없는 지표.
+  trendOff?: boolean;
   // 날짜별 값이 실제로 담는 기간(dailyCadence 공지에 그대로 표시). 없으면 "그날 하루 값".
   // 출처가 하루치를 주지 않아 누적 집계를 날마다 기록하는 지표는 반드시 적는다(2026-11-11 — 누적값을 일별로 오해하지 않게).
   windowNote?: string;
@@ -112,7 +115,7 @@ export const METRICS: MetricDef[] = [
       note: '※ Cloudflare HTTP 트래픽 중 IPv6 비율(실측)입니다. 한국 유선망은 IPv6 도입률이 낮아 일부 ISP(예: KT·SK브로드밴드)는 0%에 가깝게 나올 수 있으며, 이는 측정값이지 오류가 아닙니다.' } },
   // RPKI 라우팅 보안: ISP가 광고하는 BGP 경로 중 암호학적으로 검증(RPKI valid)되는 비율 — 경로 하이재킹 방어 수준.
   // API가 현재 상태만 제공 → collect-iqi.ts가 매일 스냅샷을 누적(수집 시작 2026-07-08 이후 이력만 존재).
-  { id: 'rpkiValid', name: 'RPKI 라우팅 보안 적용률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true, noSamples: true, windowNote: RPKI_WINDOW,
+  { id: 'rpkiValid', trendOff: true, name: 'RPKI 라우팅 보안 적용률', source: 'cloudflare', unit: '%', higherIsBetter: true, hard: { min: 0, max: 100 }, dailyCadence: true, noSamples: true, windowNote: RPKI_WINDOW,
     cite: { grade: 'A', basis: 'Cloudflare Radar 라우팅: ASN별 BGP 경로 중 RPKI 유효(valid) 비율 — 공개 BGP 데이터 기반, 2시간 주기 갱신', url: 'https://radar.cloudflare.com/routing',
       note: '※ 경로 위·변조(BGP 하이재킹)에 대한 방어 수준입니다. 높을수록 이 통신사가 인터넷에 광고하는 경로가 암호학적으로 검증됩니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
 
@@ -136,28 +139,28 @@ export const METRICS: MetricDef[] = [
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 유휴 상태 지연 변동(지터) — 국내 3사는 측정 원자료로 계산한 그날 하루 값, 해외는 직전 90일 누적', url: 'https://radar.cloudflare.com/quality',
       note: '※ 지연시간이 얼마나 출렁이는지(변동폭)입니다. 낮을수록 화상회의·게임·실시간 스트리밍이 안정적입니다.' } },
   // 패킷 손실률: API 원값이 이미 %단위(실데이터 분포로 검증: 0~0.2% 수준). M-Lab lossRate와 독립 측정이라 교차검증 가능.
-  { id: 'packetLoss', name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true, windowNote: CFSPEED_WINDOW, cumulativeNote: CFSPEED_CUM,
+  { id: 'packetLoss', trendOff: true, name: '패킷 손실률', source: 'cfspeed', unit: '%', higherIsBetter: false, hard: { min: 0, max: 100 }, dailyCadence: true, windowNote: CFSPEED_WINDOW, cumulativeNote: CFSPEED_CUM,
     cite: { grade: 'A', basis: 'Cloudflare Speed Test: 패킷 손실률 — 국내 3사는 측정 원자료로 계산한 그날 하루 값, 해외는 직전 90일 누적', url: 'https://radar.cloudflare.com/quality',
       note: '※ M-Lab 손실률(TCP 재전송 기반)과 측정 방식이 다른 독립 실측입니다. 두 값을 함께 보면 교차검증이 됩니다. 0%가 정상이며 0.5%만 넘어도 체감 품질이 떨어집니다.' } },
 
   // --- NIA 속도측정 (speed.nia.or.kr, 정부기관) ---
   // 측정통계 페이지의 데이터 피드(statistic_isp.asp)에서 상품별 사업자 평균을 일별 스냅샷으로 수집(collect-nia.ts).
   // 국내 전용(해외 ISP 데이터 없음). 상품 4종 × 다운/업 8종 전부 노출 — 필요 없는 것은 나중에 제거(2026-07-15 결정).
-  { id: 'niaDl100', name: '다운로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaDl100', trendOff: true, name: '다운로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 100M 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaUl100', name: '업로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaUl100', trendOff: true, name: '업로드 속도 (100M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 1000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 100M 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaDl500', name: '다운로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaDl500', trendOff: true, name: '다운로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 500M 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaUl500', name: '업로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaUl500', trendOff: true, name: '업로드 속도 (500M 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 5000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 500M 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaDl1g', name: '다운로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaDl1g', trendOff: true, name: '다운로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 1G 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaUl1g', name: '업로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaUl1g', trendOff: true, name: '업로드 속도 (1G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 1G 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaDl10g', name: '다운로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaDl10g', trendOff: true, name: '다운로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 10G 상품 가입자의 사업자별 평균 다운로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
-  { id: 'niaUl10g', name: '업로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
+  { id: 'niaUl10g', trendOff: true, name: '업로드 속도 (10G 상품)', source: 'nia', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 20000 }, dailyCadence: true, noSamples: true, windowNote: NIA_WINDOW, cumulativeNote: NIA_CUM,
     cite: { grade: 'A', basis: 'NIA(한국지능정보사회진흥원) 인터넷 품질측정: 10G 상품 가입자의 사업자별 평균 업로드 속도 공개 통계(월간 집계)', url: 'https://speed.nia.or.kr/statistics/statistic.asp', note: NIA_NOTE } },
 
   // --- M-Lab (ndt7) ---
@@ -189,7 +192,7 @@ export const METRICS: MetricDef[] = [
       note: '※ Netflix가 자사 시청 트래픽에서 집계한 프라임타임(저녁 시청 몰림 시간대) 평균 재생 속도입니다. 영상 재생은 화질에 필요한 만큼만 받으므로(비트레이트 상한) 값이 수 Mbps로 작게 나오는 게 정상이며, 회선 최대 속도가 아니라 "가장 붐빌 때 스트리밍 품질을 유지하는 능력"을 ISP끼리 비교하는 지표입니다. 월 1회 갱신됩니다.' } },
   // Steam 다운로드 속도: Valve가 공개하는 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 Mbps(실제 게임 다운로드 트래픽).
   // 엔드포인트가 현재 창 집계만 제공 → collect-steam.ts가 매일 스냅샷 누적(수집 시작 2026-07-10 이후 이력만 존재).
-  { id: 'steamDownload', name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: STEAM_WINDOW, cumulativeNote: STEAM_CUM,
+  { id: 'steamDownload', trendOff: true, name: 'Steam 다운로드 속도', source: 'etc', unit: 'Mbps', higherIsBetter: true, hard: { min: 0, max: 10000 }, dailyCadence: true, noSamples: true, windowNote: STEAM_WINDOW, cumulativeNote: STEAM_CUM,
     cite: { grade: 'A', basis: 'Valve Steam 다운로드 통계: 국가별 주요 ISP의 Steam 클라이언트 평균 다운로드 속도(실제 게임 다운로드 트래픽) 공개값', url: 'https://store.steampowered.com/stats/content/',
       note: '※ 전 세계 Steam 이용자의 실제 게임 다운로드에서 집계한 평균 속도로, 대용량 CDN 전송 성능을 보여줍니다(Netflix Speed Index의 게임판 격). 통신사 내 캐시 서버 유무·이용자 회선 구성에 따라 달라져 ISP 간 상대·추세 비교용이며, 가입 상품 속도가 아닙니다. 수집 시작(2026-07) 이후부터 이력이 쌓입니다.' } },
   // DNSSEC 검증률: 이 통신사 이용자 중 DNS 응답 위조를 검증(DNSSEC)하는 리졸버 사용 비율. APNIC(아태 IP주소 관리기구) 실측.

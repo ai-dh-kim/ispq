@@ -31,8 +31,10 @@ export default function MetricSection(props: Props) {
   // 차트별 추이 설정(2026-11-17 사용자 요청): 추이 공지 줄의 체크박스(켬/끔)와 일수(7·30일)로 지표마다 따로 고른다.
   // 기본값은 상단 툴바 '추이' — 툴바 값을 바꾸면 모든 차트가 그 값으로 다시 맞춰진다(개별 설정은 그때 초기화).
   const globalDays = props.trendDays ?? 0;
-  const [local, setLocal] = useState(() => ({ on: globalDays > 0, days: globalDays || TREND_DAYS[0] }));
-  useEffect(() => { setLocal({ on: globalDays > 0, days: globalDays || TREND_DAYS[0] }); }, [globalDays]);
+  // trendOff 지표(패킷손실·RPKI·NIA·Steam)는 기본 꺼짐 — 툴바 값을 바꿔도 꺼진 상태로 다시 맞춘다(일수는 툴바 값을 따라 둬서 켜면 그 일수).
+  const defaultOn = globalDays > 0 && !metric.trendOff;
+  const [local, setLocal] = useState(() => ({ on: defaultOn, days: globalDays || TREND_DAYS[0] }));
+  useEffect(() => { setLocal({ on: defaultOn, days: globalDays || TREND_DAYS[0] }); }, [globalDays, defaultOn]);
   const trend = trendable && local.on ? local.days : 0;
 
   // dailyCadence(일별 수집) 지표는 항상 coarse(1일 버킷) — MetricChart의 티어 강제와 일치시켜야 공지 날짜가 맞음.
